@@ -177,7 +177,7 @@ We try masking each word in order; for instance, at one point we will end up wit
 
 > Tyger Tyger, burning bright, in the [MASK] of the night
 
-The program uses the neural network to predict what word appears in the masked position, subject to various constraints such as rhyme and meter. In this case, the BERT model guesses "middle," with probability 0.6762. On the other hand, the word that is actually in that position—"forests"—gets probability 0.000076159. We divide the latter by the former to get a score for this 0.0001126. Since this score happens to be the lowest for any word in the text, the program selects this word for replacement, giving us this revision:
+The program uses the neural network to predict what word appears in the masked position, subject to various constraints such as rhyme and meter. In this case, the BERT model guesses "middle," with probability 0.6762. On the other hand, the word that is actually in that position—"forests"—gets probability 0.000076159. We divide the latter by the former to get a score for this potential change: 0.0001126. Since this score happens to be the lowest for any word in the text, the program selects the word "forests" for replacement, giving us this revision:
 
 > Tyger Tyger, burning bright, in the middle of the night
 
@@ -193,7 +193,7 @@ The brackets indicate that the program is not allowed to alter that text. If the
 
 For more details about how it all works, see the code.
 
-I have also experimented with GPT-2, but the results have not been very good. The problem is that, while BERT is able to look both forward and backward when predicting a word, GPT-2 only looks backward; accordingly, it is not good at generating words that fit into a pre-existing structure. I did, however, include a function that generates GPT-2 text constrained by the meter and rhyme scheme of a given poem. The results are so prosaic that it is difficult even to detect the meter, although it is indeed there:
+I have also experimented with GPT-2, but the results have not been very good. The problem is that, while BERT is able to look both forward and backward when predicting a word, GPT-2 only looks backward; accordingly, it is not good at generating words that fit into a pre-existing structure. I did, however, include a function that generates GPT-2 text constrained by the meter and rhyme scheme of a given poem. The results are so prosaic that it is difficult even to detect the rhyme and meter, although the output can, indeed, be read with the same rhythms as the original:
 
 > Tyger Tyger, also known  
 > in the English as "the lone  
