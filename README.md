@@ -47,11 +47,11 @@ Here is the result after fifty iterations:
 > Bring me my Instrument of fire!  
 >   
 > I will not die from Our Fight,  
-> Nor will my spear be in my hand:  
-> For we have reached Jerusalem,  
-> In our time & pleasant land.
+> Nor will my spear be in my hand:    
+> For we have reached Jerusalem,    
+> In our time & pleasant land.  
 
-As another example, here is Blake's "O Rose Thou Art Sick":
+As another example, here is Blake's "The Sick Rose":
 
 > O Rose thou art sick.  
 > The invisible worm,  
@@ -75,7 +75,7 @@ Here is the revision:
 > And his own power that  
 > Makes his life complete.
 
-Here is another version, based on different language model called RoBERTa:
+Here is an alternative version, based on different language model called RoBERTa:
 
 > They are his cold hands.  
 > the aluminum shards,  
@@ -193,7 +193,43 @@ The brackets indicate that the program is not allowed to alter that text. If the
 
 For more details about how it all works, see the code.
 
-I have also experimented with GPT-2, but the results have not been very good. The problem is that, while BERT is able to look both forward and backward when predicting a word, GPT-2 only looks backward; accordingly, it is not good at generating words that fit into a pre-existing structure. I did, however, include a function that generates GPT-2 text constrained by the meter and rhyme scheme of a given poem. The results are so prosaic that it is difficult even to detect the rhyme and meter, although the output can, indeed, be read with the same rhythms as the original:
+## Other experiments
+
+The program can also perform an alternative procedure that replaces the words in the order in which they appear in the text, rather than choosing which words to replace based on their scores. This is exponentially faster than the default procedure, but the results are generally not as compelling, especially when a topic is specified. This, for instance, is the output for "The Sick Rose":
+
+> Where else thou be thou.  
+> The mysterious man,  
+> Who slept in a bed  
+> In a stormy night:  
+>   
+> He drew from his heart  
+> His secret friend:  
+> And whose own secret friend  
+> Did his life depend.  
+
+The sequential procedure does a bit better with "Jerusalem":
+
+> And let your God in our hearts  
+> Shine upon our pastures clean:  
+> And say the mighty Word of Christ,  
+> On our fertile pastures green!  
+>   
+> In may the Glorious Divine,  
+> Come down upon many fertile lands?  
+> And is Jerusalem hidden here,  
+> Beneath these green Eternal Sands?  
+>   
+> Bring I my Spear of shining light:  
+> Bring I my weapon of devotion:  
+> Bring I my Sword: Watch it again!  
+> Bring I my Instrument of motion!  
+>   
+> We shall not die of Our Wounds,  
+> Nor let my heart rest in your hands:  
+> For I have found Jerusalem,  
+> And many rich & fertile lands.
+
+I have also experimented with GPT-2, but the results have not been very good. The problem is that, whereas BERT is able to look both forward and backward when predicting a word, GPT-2, like the Angel of History, only looks backward; accordingly, it is not good at generating words that fit into a pre-existing structure. I did, however, include a function that generates GPT-2 text constrained by the meter and rhyme scheme of a given poem. The results are so prosaic that it is difficult even to detect the rhyme and meter, although the output can, indeed, be read with the same rhythms as the original:
 
 > Tyger Tyger, also known  
 > in the English as "the lone  
