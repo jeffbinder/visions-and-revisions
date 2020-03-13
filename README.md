@@ -1,13 +1,47 @@
 # A Hundred Visions and Revisions
 
-    Tyger Tyger, Flowers lay,
-    In the middle of the day;
-    Are poetic words just words,
-    To give you extra energy?
+    The recognition of their presence in a tree:
+    Sitting on the long, thick branch.
 
 "A Hundred Visions and Revisions" is a computer program that alters poems using a neural-network language model. It works by replacing the individual words of the text, one by one, with other words that are more probable according to the BERT language model, while preserving rhyme and meter; in effect, this process banalifies the poem, replacing its linguistic distinctiveness with normativity. The program can also attempt to revise a poem to be about a different topic.
 
-As an example, I started with the poem "Jerusalem" by William Blake:
+As an example, I started with the poem "The Sick Rose" by William Blake:
+
+> O Rose thou art sick.  
+> The invisible worm,  
+> That flies in the night  
+> In the howling storm:  
+>   
+> Has found out thy bed  
+> Of crimson joy:  
+> And his dark secret love  
+> Does thy life destroy.
+
+Here is the revision:
+
+> By God thou art blessed.  
+> The invisible man,  
+> Who walks in the night  
+> In a hooded cloak:  
+>   
+> Has found both his source  
+> Of body heat:  
+> And his own power that  
+> Makes his life complete.
+
+There are various settings by which the behavior the program can be altered. Here is an alternative version of "The Sick Rose," based on different language model called RoBERTa:
+
+> They are his cold hands.  
+> the aluminum shards,  
+> his hands in the snow  
+> and the melting ice:  
+>   
+> that carve out his heart  
+> from molten clay:  
+> and his cold fingers that  
+> take his life away.
+
+As another example, here is Blake's poem "Jerusalem":
 
 > And did those feet in ancient time  
 > Walk upon Englands mountains green:  
@@ -50,42 +84,6 @@ Here is the result after fifty iterations:
 > Nor will my spear be in my hand:    
 > For we have reached Jerusalem,    
 > In our time & pleasant land.  
-
-As another example, here is Blake's "The Sick Rose":
-
-> O Rose thou art sick.  
-> The invisible worm,  
-> That flies in the night  
-> In the howling storm:  
->   
-> Has found out thy bed  
-> Of crimson joy:  
-> And his dark secret love  
-> Does thy life destroy.
-
-Here is the revision:
-
-> By God thou art blessed.  
-> The invisible man,  
-> Who walks in the night  
-> In a hooded cloak:  
->   
-> Has found both his source  
-> Of body heat:  
-> And his own power that  
-> Makes his life complete.
-
-Here is an alternative version, based on different language model called RoBERTa:
-
-> They are his cold hands.  
-> the aluminum shards,  
-> his hands in the snow  
-> and the melting ice:  
->   
-> that carve out his heart  
-> from molten clay:  
-> and his cold fingers that  
-> take his life away.
 
 ## Changing the topic of a text
 
