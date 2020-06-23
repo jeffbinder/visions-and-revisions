@@ -29,7 +29,19 @@ Here is the revision:
 > And his own power that  
 > Makes his life complete.
 
-There are various settings by which the behavior the program can be altered. Here is an alternative version of "The Sick Rose," based on different language model called RoBERTa:
+I have also tried finetuning the neural network on a corpus of about 10,000 poems so as to improve the predictions. Here are the results:
+
+> Thank God you are safe.  
+> The emotional wind,  
+> That blows in the east  
+> In a brutal gale:  
+>   
+> Tears leaked out like mud  
+> From driving rain:  
+> In your eyes only strands  
+> Of your hair remain.
+
+As you can see, the program can produce very different output depend on how it is set up. Here is an alternative version of "The Sick Rose," based on different language model called RoBERTa:
 
 > They are his cold hands.  
 > the aluminum shards,  
@@ -87,9 +99,11 @@ Here is the result after fifty iterations:
 
 ## Changing the topic of a text
 
-It is also possible to have the program revise a poem to be about a different topic while retaining rhyme, meter, and some other, subtler traces of the original. To do this, the program adds extra text at the beginning saying "The following poem is about x," along with a similar statement at the end. The program them computes probabilities both with and without the extra hints and biases the results in favor of words that the hints make more probable.
+[UPDATE June 2020: I have redone the "Tyger" examples in this section to use the new, finetuned model.]
 
-For example, here are some computer-generated variants of the first stanza of another famous Blake poem, "The Tyger." The following examples were generated with some degree of randomness, which generally leads to better results (in part since it helps the program avoid [local optima](https://en.wikipedia.org/wiki/Local_optimum)); I also set the program to leave the first two words of the text alone.
+It is also possible to have the program revise a poem to be about a different topic while retaining rhyme, meter, and some other, subtler traces of the original. When I created the finetuned neural network, I included annotations indicating the title and author of each poem. This enables the AI to pick up on patterns in the relation between title and poem. You can then feed in hints about the poem's title, and the AI will alter the text accordingly.
+
+For example, here are some computer-generated variants of the first stanza of another famous Blake poem, "The Tyger," with various different titles. The following examples were generated with some degree of randomness, which generally leads to better results (in part since it helps the program avoid [local optima](https://en.wikipedia.org/wiki/Local_optimum)); I also set the program to leave the first two words of the text alone.
 
 Original text:
 
@@ -98,42 +112,51 @@ Original text:
 > What immortal hand or eye,  
 > Could frame thy fearful symmetry?
 
-topic="strolling through a lovely flower garden":
+title="Strolling through a lovely flower garden":
 
-> Tyger Tyger, lily green,  
-> in the center of the scene;  
-> From horizon eye to eye,  
-> You see that lovely gardener?
+> Tyger Tyger, lovely tree,  
+> In a garden by the sea;  
+> What admiring ear or eye,  
+> Can see such lovely scenery?
 
-topic="charging into glorious battle":
+title="Charging into glorious battle":
 
-> Tyger Tyger, shining shield,  
-> In the middle of the field;  
-> Thy opponent eye to eye,  
-> Where lies thy mortal enemy?
+> Tyger Tyger, shining sword,  
+> In the battle stands the lord;  
+> Yet unable hand or foot,  
+> Can fight this mighty warrior?
 
-topic="the aesthetics of gothic cathedrals":
+title="The aesthetics of Gothic cathedrals":
 
-> Tyger Tyger, magnus holm,  
-> And the beauty of the dome;  
-> Does cathedral dome have lights,  
-> Which shine on gothic capitals?
+> Tyger Tyger, gothic spire,  
+> In the middle of the shire;  
+> Which cathedral bore that spire,  
+> Which bore that gothic pinnacle?
 
-topic="urban planning and traffic management":
+title="Urban planning and traffic management":
 
 > Tyger Tyger, traffic light,  
 > In the middle of the night;  
-> When attackers came on foot,  
-> Why break that traffic barrier?
+> Does policeman check his lights,  
+> Not check his traffic cameras?
 
-topic="a little, fluffy kitty cat":
+title="A little, fluffy kitty cat":
 
 > Tyger Tyger, kitty cat,  
-> In the posture of a bat;  
-> No protruding fangs or claws,  
-> What is this furry animal?
+> In the middle of a chat;
+> What electric freak was he,
+> To send such nasty messages?
 
-All of these texts retain the rhyme, meter, and punctuation of the original (excepting the slant-rhyme of "eye" and "symmetry", which the current code cannot detect). If these formal constraints are lifted, the poem will degenerate into prose that bears little relation to the original, a fact best illustrated by the full sequence of steps by which this stanza is transformed into a text about "computational language modeling with artificial neural networks":
+title="Leaves of Grass":
+
+> Tyger Tyger, broken glass,  
+> In the middle of the grass;  
+> Leaves forever blown by wind,  
+> How much more petty agony?
+
+As the latter example shows, the model appears to be going off of the words in the title, not recalling any specific information about the titles of pre-existing poems. The titles thus seem to function mainly as topical hints. I need, however, to do more research into exactly what is happening with the titles.
+
+All of these revisions retain the rhyme, meter, and punctuation of the original (excepting the slant-rhyme of "eye" and "symmetry", which the current code cannot detect). If these formal constraints are lifted, the poem will degenerate into prose that bears little relation to the original, a fact best illustrated by the full sequence of steps by which this stanza is transformed into a text about "computational language modeling with artificial neural networks":
 
 > tyger tyger, burning bright, in the forests of the night; what immortal hand or eye, could frame such fearful symmetry?  
 > tyger tyger, burning bright, in the forests of the night; what immortal hand or eye, could frame **create** fearful symmetry?  
@@ -161,6 +184,77 @@ All of these texts retain the rhyme, meter, and punctuation of the original (exc
 > john lennon, using computers, in the middle of the night with an artificial intelligence expert **asking**, could you predict such things?  
 > john lennon, using computers, in the middle of the night **hears** an artificial intelligence expert asking, could you predict such things?
 
+## Changing the author
+
+The finetuned model also incorporates information about the authors of the poem it is trained on. Based on this, it is possible to give the program hints about the author of a poem as well as the title.
+
+For example, here is the first stanza of "I Wandered Lonely as a Cloud" by William Wordsworth:
+
+> I wandered lonely as a cloud  
+> That floats on high o'er vales and hills,  
+> When all at once I saw a crowd,  
+> A host, of golden daffodils,  
+> Beside the lake, beneath the trees,  
+> Fluttering and dancing in the breeze.
+
+I told the AI that this poem was called "Rime of the Ancient Mariner" by Samuel Taylor Coleridge. Here is its revision:
+
+> He fired blindly at a whale  
+> That shot straight out like a dart and died,  
+> Till all at once he blew a gale,  
+> A blast, till nothing unified,  
+> Except the blast, engulfed the whale,  
+> Shattering and snapping in the gale.
+
+Entering "The Raven" by Edgar Allan Poe gave very different results:
+
+> While standing staring at a bird  
+> I watched it tick like a moth in space,  
+> Till all at once I heard a word,  
+> A phrase, no longer commonplace,  
+> Without a rhyme, without a plot,  
+> Fragmented and twisted in a knot.
+
+## BERT-rimés
+
+[Bouts-rimés](https://en.wikipedia.org/wiki/Bouts-Rimés) is an old French game in which one person selects a series of rhyming words and another person composes a poem using them. The idea is to pick words that are tricky to use–words that don't seem to make sense together–so that it is a challenge to create a coherent, natural-sounding poem. BERT, it turns out, is able to play this game, sort of.
+
+Doing this was a little tricky, since BERT is not ideal for generating wholly new text. To start with, I wrote a function that generates words in order, following a specified meter and inserting the rhyming words at the ends of the lines. The results at this point are generally not so good; however, this stage is necessary so as to choose a syllable structure that fits the meter while roughly suiting the patterns of the English language. I then run the revision procedure to turn this initial text into something more coherent.
+
+For example, I entered the rhyming words from the first stanza of "I Wandered Lonely as a Cloud": cloud, hills, crowd, daffodils, trees, breeze. I set the verse form to iambic quadrimeter (which is the form used by the original poem) and also entered the title and author of the original. Here is the almost totally nonsensical initial output:
+
+> Opponents simulator cloud,  
+> The education rocked a hills.  
+> Recapture to a hui crowd,  
+> Royale disposed the daffodils.  
+> A vickers macy shrines and trees,  
+> And overseeing of a breeze.
+
+Here is the output after 35 rounds of revision:
+
+> Another solitary cloud.  
+> The disappearance of the hills.  
+> Returning to the evening crowd,  
+> Alone among the daffodils,  
+> The flowers drifting through the trees,  
+> In expectation of a breeze.
+
+As another example, I asked for an iambic pentameter couplet using the rhyming words "storm" and "form." This time I did not specify any title or author. Here is the result:
+
+> Results included project solar storm,  
+> The first proposal for another form.
+
+## Metalizer
+
+I also included a feature that enables you to bias the output toward an arbitrary vocabulary. I tested this out using the data from Iain Barr's [analysis of the vocabulary of heavy metal lyrics](https://github.com/ijmbarr/pythonic-metal). Suppose, for instance, "I Wandered Lonely as a Cloud" is not metal enough for your tastes. Perhaps you would prefer this machine-generated alternative:
+
+> Rage flooded slowly through her veins  
+> That burned as cold as the sky and ground,  
+> Then all at once she dropped her chains,  
+> And spit, spit hatred underground,  
+> Into her flesh, into the stone,  
+> Vibrated and rattled in her bone.
+
 ## How it works
 
 This program works with the [BERT](https://arxiv.org/pdf/1810.04805v2.pdf) language model, which is based on the [Transformer](https://arxiv.org/pdf/1706.03762.pdf) architecture. (BERT is related to the [GPT-2](https://openai.com/blog/better-language-models/) model used in [Talk to Transformer](https://talktotransformer.com/), although it uses a different network configuration and data set; whereas GPT-2 is trained on text from the internet, BERT is trained on books and Wikipedia articles.)
@@ -183,9 +277,13 @@ The program then repeats this process until there are no more "improvements" to 
 
 To alter the topic of a text, the program adds additional text intended to influence the language model's predictions.
 
-> \[The following poem is about flowers:\] Tyger Tyger, burning bright, in the forests of the night \[The preceding poem was about flowers.\]
+> \{The following poem is titled flowers:
+> ****\}
+> Tyger Tyger, burning bright, in the forests of the night
+> \{****
+> The preceding poem is by Charles Baudelaire.\}
 
-The brackets indicate that the program is not allowed to alter that text. If the "strong topic bias" feature is turned on, the program computes the probabilities both with and without these annotations and biases the probabilities by the formula ```(probability with annotations / probability without annotations) ** n```, where n is a factor indicating the strength of the topic bias (2.0 is recommended). In this case, the topic annotations cause the program to produce a different prediction:
+I also added similar text to the collection of poems on which I finetuned the model, so that the neural network would learn to recognize this type of annotation. The brackets indicate that the program is not allowed to alter that text. If the "strong topic bias" feature is turned on, the program computes the probabilities both with and without these annotations and biases the probabilities by the formula ```(probability with annotations / probability without annotations) ** n```, where n is a factor indicating the strength of the topic bias (2.0 is recommended). In this case, the topic annotations cause the program to produce a different prediction:
 
 > Tyger Tyger, burning leaves, in the middle of the night
 
