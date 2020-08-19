@@ -325,7 +325,7 @@ The sequential procedure does a bit better with "Jerusalem":
 > For I have found Jerusalem,  
 > And many rich & fertile lands.
 
-I have also experimented with GPT-2, but the results have not been very good. The problem is that, whereas BERT is able to look both forward and backward when predicting a word, GPT-2, like the Angel of History, only looks backward; accordingly, it is not good at generating words that fit into a pre-existing structure. I did, however, include a function that generates GPT-2 text constrained by the meter and rhyme scheme of a given poem. The results are so prosaic that it is difficult even to detect the rhyme and meter, although the output can, indeed, be read with the same rhythms as the original:
+I have also done some experiments with GPT-2, although my word-by-word revision technique does not work with GPT-style models. The problem is that, whereas BERT is able to look both forward and backward when predicting a word, GPT-2, like the Angel of History, only looks backward; accordingly, it is not good at generating words that fit into a pre-existing structure. I did, however, include a function that generates GPT-2 text constrained by the meter and rhyme scheme of a given poem. The results are so prosaic that it is difficult even to detect the rhyme and meter, although the output can, indeed, be read with the same rhythms as the original:
 
 > Tyger Tyger, also known  
 > in the English as "the lone  
