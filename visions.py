@@ -19,6 +19,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 tokenizer = None
 model = None
 loaded_model_type = None
+loaded_model_path = None
 
 from nltk.corpus import stopwords
 from nltk.corpus import cmudict
@@ -93,6 +94,83 @@ def is_punctuation(tok):
     tok = tokenizer.convert_tokens_to_string([tok])
     return not re_word.match(tok)
 
+# Scan a text to determine spacing and capitalization so that they can be
+# preserved after detokenization.
+def scan_tokenization(model, text, toks):
+    bert = model.startswith('bert') or model.startswith('distilbert')
+    spacing = []
+    capitalization = []
+    char_idx = 0
+    tok_idx = 0
+    tok_char_idx = 0
+    current_spacing = ''
+    current_capitalization = None
+    while char_idx < len(text):
+        char = text[char_idx]
+        word_piece = False
+        try:
+            tok = toks[tok_idx]
+            if is_word_piece(model, tok):
+                tok = join_word_pieces([tok])
+                word_piece = True
+        except IndexError:
+            tok = ''
+        try:
+            tok_char = tok[tok_char_idx]
+        except IndexError:
+            tok_char = ''
+        if not char.isspace():
+            if tok_char_idx == 0:
+                if char.isupper():
+                    current_capitalization = 'upper_ambiguous'
+                else:
+                    current_capitalization = 'lower'
+            elif current_capitalization in ('upper_ambiguous', 'upper_all'):
+                if char.isupper():
+                    current_capitalization = 'upper_all'
+                else:
+                    current_capitalization = 'upper_initial'
+            char_idx += 1
+            tok_char_idx += 1
+            if tok_char_idx == len(tok):
+                tok_idx += 1
+                tok_char_idx = 0
+                if not word_piece:
+                    spacing.append(current_spacing)
+                    capitalization.append(current_capitalization)
+                    current_spacing = ''
+                    current_capitalization = None
+        elif tok_char_idx == 0:
+            current_spacing += char
+            char_idx += 1
+    spacing.append(current_spacing)
+    return (spacing, capitalization)
+    
+def detokenize(model, toks, spacing, capitalization):
+    text = ''
+    i = 0
+    j = 0
+    current_capitalization = None
+    while i < len(toks):
+        tok = toks[i]
+        if is_word_piece(model, tok):
+            tok = join_word_pieces([tok])
+            if current_capitalization == 'upper_all':
+                tok = tok.upper()
+        else:
+            current_spacing = spacing[j]
+            text += current_spacing
+            current_capitalization = capitalization[j]
+            if current_capitalization in ('upper_initial', 'upper_ambiguous'):
+                tok = tok[0].upper() + tok[1:]
+            elif current_capitalization == 'upper_all':
+                tok = tok.upper()
+            j += 1
+        text += tok
+        i += 1
+    text += spacing[-1]
+    return text
+
 def create_meter_dict(model_type):
     print("Generating " + model_type + '_meter_dict.pkl')
     vocab = tokenizer.get_vocab()
@@ -149,8 +227,13 @@ word_pieces = None
 rhymable_words = None
 rhyme_matrix = None
 rhyme_tensors = {}
+rhyme_and_meter_loaded = None
 def initialize_rhyme_and_meter(model, meter=False, rhymes=False):
-    global vocab, vocab_size, word_pieces, meter_dict, rhymable_words, rhyme_matrix
+    global vocab, vocab_size, word_pieces, meter_dict, rhymable_words, rhyme_matrix, rhyme_and_meter_loaded
+    if rhyme_and_meter_loaded == model:
+        return
+    else:
+        rhyme_and_meter_loaded = model
     vocab = tokenizer.get_vocab()
     vocab_size = len(vocab)
     if meter:
@@ -177,8 +260,10 @@ def initialize_rhyme_and_meter(model, meter=False, rhymes=False):
         rhymable_words, rhyme_matrix = pickle.load(f)
 
 def initialize_model(model_type, model_path):        
-    global tokenizer, model, loaded_model_type, bos_token, eos_token
-    if loaded_model_type != model_type:
+    global tokenizer, model, loaded_model_type, loaded_model_path, bos_token, eos_token
+    if loaded_model_type != model_type or loaded_model_path != model_path:
+        loaded_model_type = model_type
+        loaded_model_path = model_path
         if model_type.startswith('distilbert'):
             tokenizer = DistilBertTokenizer.from_pretrained(model_path or model_type)
             model = DistilBertForMaskedLM.from_pretrained(model_path or model_type)
@@ -513,16 +598,17 @@ def process_text(model, text, start, end, match_rhyme, strip_punctuation=False):
 
         # Check for multipart words.
         word_bounds = []
+        after_apostrophe = False
         for i, tok in enumerate(line_toks):
-            if is_word_piece(model, tok) or tok in ("'", "s", "st", "d",
-                                                    "ve", "re", "nt", "ll",
-                                                    "t", "m"):
+            if is_word_piece(model, tok) or \
+                    (after_apostrophe and tok in ("'", "s", "d", "st", "ve", "re", "nt", "ll", "t", "m")):
                 if not word_bounds:
                     word_bounds.append([i, i])
                 else:
                     word_bounds[-1][1] = i
             else:
                 word_bounds.append([i, i])
+            after_apostrophe = tok == '\''
         for i1, i2 in word_bounds:
             if i1 == i2:
                 continue
@@ -582,6 +668,7 @@ def depoeticize(text, max_iterations=100,
                 strong_topic_bias=False, stop_score=1.0,
                 discourage_repetition=False, stopwords=stopwords.words('english'),
                 model_type='bert-base-uncased', model_path=None,
+                preserve_spacing_and_capitalization=False,
                 allow_punctuation=None, sequential=False, verbose=True):
     stopwords = set(stopwords)
 
@@ -606,6 +693,10 @@ def depoeticize(text, max_iterations=100,
         = process_text(model_type, text, start, end, match_rhyme)
     tokenized_text = toks1 + toks2 + toks3
     n = len(tokenized_text)
+    
+    if preserve_spacing_and_capitalization:
+        print("The preserve_spacing_and_capitalization feature is not yet implemented!")
+        spacing, capitalization = scan_tokenization(model_type, text, tokenized_text)
 
     forbidden_texts = {}
 
@@ -764,6 +855,16 @@ def depoeticize(text, max_iterations=100,
                 tokenized_text[i1] = token
                 new_token_indices.append(i1)
 
+            fixed_toks_new = set()
+            for fixed_tok in fixed_toks:
+                if fixed_tok > i1 and fixed_tok <= i2:
+                    pass
+                elif fixed_tok > i2:
+                    fixed_toks_new.add(fixed_tok - (i2 - i1))
+                else:
+                    fixed_toks_new.add(fixed_tok)
+            fixed_toks = fixed_toks_new
+                
             for i in range(i1, i2+1):
                 if i in multipart_words:
                     del multipart_words[i]
@@ -799,16 +900,22 @@ def depoeticize(text, max_iterations=100,
             sample = tokenized_text[start:-end].copy()
             for i in new_token_indices:
                 sample[i-start] = '<' + sample[i-start] + '>'
-            text = tokenizer.convert_tokens_to_string(sample)
+            if preserve_spacing_and_capitalization:
+                text = detokenize(model_type, sample, spacing, capitalization)
+            else:
+                text = tokenizer.clean_up_tokenization(tokenizer.convert_tokens_to_string(sample))
             print('-----------------------')
             print('Iteration {0}, score = {1}'.format(k+1, last_score))
-            print(tokenizer.clean_up_tokenization(text))
+            print(text)
 
         if randomize and cooldown:
             randomize *= (1.0 - cooldown)
             
-    text = tokenizer.convert_tokens_to_string(tokenized_text[start:-end])
-    return tokenizer.clean_up_tokenization(text)
+    if preserve_spacing_and_capitalization:
+        text = detokenize(model_type, tokenized_text[start:-end], spacing, capitalization)
+    else:
+        text = tokenizer.clean_up_tokenization(tokenizer.convert_tokens_to_string(tokenized_text[start:-end]))
+    return text
 
 # Generates a wholly new text by running a decoder model forward with the specified
 # constraints. This doesn't work very well.
@@ -950,6 +1057,155 @@ def metalness_modifier():
         if tok in metalness:
             metalness_modifier[i] = metalness[tok]
     return m(torch.tensor(metalness_modifier))
+
+# Depoeticizes a text piece by piece examining only an n-word window at a time, with
+# a certain amount of context to the left and right. This procedure can handle longer
+# texts than depoeticize().
+def banalify(text, window_size=10, context_size=10,
+             max_iterations=100, match_meter=False, match_rhyme=False,
+             title=None, author=None, randomize=False, cooldown=0.01, modifier=None,
+             forbid_reversions=True, preserve_punctuation=False,
+             strong_topic_bias=False, stop_score=1.0,
+             discourage_repetition=False, stopwords=stopwords.words('english'),
+             model_type='bert-base-uncased', model_path=None,
+             allow_punctuation=None, sequential=False, verbose=True):
+    initialize_model(model_type, model_path)
+    initialize_rhyme_and_meter(model_type, meter=match_meter or allow_punctuation is not None,
+                               rhymes=match_rhyme)
+    
+    toks = tokenizer.tokenize(text)
+    spacing, capitalization = scan_tokenization(model_type, text, toks)
+    
+    out_toks = []
+    left_context_toks = []
+    left_context_text = ''
+    left_context_size = 0
+    
+    i = 0
+    spacing_idx = 0
+    bracket_left_open = False
+    while i < len(toks):
+        # Count the current_window excluding { and }
+        window_end = i
+        num_non_word_pieces = 0
+        bracket_indices = set()
+        j = 0
+        while j < window_size and window_end < len(toks):
+            if not is_word_piece(model_type, toks[window_end]):
+                if toks[window_end] == '{' or toks[window_end] == '}':
+                    bracket_indices.add(num_non_word_pieces)
+                else:
+                    j += 1
+                num_non_word_pieces += 1
+            window_end += 1
+            
+        # Extend the window if it ends in the middle of a word
+        while window_end < len(toks):
+            if is_word_piece(model_type, toks[window_end]):
+                window_end += 1
+            else:
+                break
+                
+        window_toks = toks[i:window_end]
+        window_text = tokenizer.convert_tokens_to_string(window_toks)
+        window_spacing = spacing[spacing_idx:spacing_idx+num_non_word_pieces] + ['']
+        window_capitalization = capitalization[spacing_idx:spacing_idx+num_non_word_pieces]
+        
+        # Cut out the spacing and capitalization for instances of { and }
+        new_spacing = []
+        tmp = ''
+        for k, s in enumerate(window_spacing):
+            if k in bracket_indices:
+                tmp = s
+            else:
+                new_spacing.append(tmp + s)
+                tmp = ''
+        window_spacing = new_spacing
+        
+        new_capitalization = []
+        tmp = ''
+        for k, s in enumerate(window_capitalization):
+            if k in bracket_indices:
+                tmp = s
+            else:
+                if tmp.startswith('upper') and s == 'lower':
+                    new_capitalization.append('upper_initial')
+                else:
+                    new_capitalization.append(s)
+                tmp = ''
+        window_capitalization = new_capitalization
+        
+        # Complete { and } if the window ended up inbetween them
+        firstopen = window_text.find('{')
+        firstclose = window_text.find('}')
+        lastopen = window_text.rfind('{')
+        lastclose = window_text.rfind('}')
+        if bracket_left_open:
+            window_text = '{' + window_text
+        if firstclose != -1 and (firstopen == -1 or firstopen > firstclose):
+            bracket_left_open = False
+        if (lastopen != -1 or bracket_left_open) and (lastclose == -1 or lastclose < lastopen):
+            window_text = window_text + '}'
+            bracket_left_open = True
+        
+        # Count the right context, as above
+        right_context_end = window_end
+        j = 0
+        while j < context_size and right_context_end < len(toks):
+            if not is_word_piece(model_type, toks[right_context_end]):
+                if toks[right_context_end] != '{' and toks[right_context_end] != '}':
+                    j += 1
+            right_context_end += 1
+        while right_context_end < len(toks):
+            if is_word_piece(model_type, toks[right_context_end]):
+                right_context_end += 1
+            else:
+                break
+                
+        right_context_toks = toks[window_end:right_context_end]
+        right_context_toks = [tok for tok in right_context_toks if tok not in ('{', '}')]
+        right_context_text = tokenizer.convert_tokens_to_string(right_context_toks)
+        if left_context_text:
+            contextualized_text = f'{{{left_context_text}}} {window_text} {{{right_context_text}}}'
+        else:
+            contextualized_text = f'{window_text} {{{right_context_text}}}'
+        
+        #print(contextualized_text)
+        contextualized_text = depoeticize(contextualized_text, max_iterations,
+                                          match_meter, match_rhyme, title, author,
+                                          randomize, cooldown, modifier,
+                                          forbid_reversions, preserve_punctuation,
+                                          strong_topic_bias, stop_score,
+                                          discourage_repetition, stopwords,
+                                          model_type, model_path,
+                                          allow_punctuation, sequential, False, verbose)
+        
+        # Trim off the previous and next windows from the output
+        window_toks = tokenizer.tokenize(contextualized_text)
+        window_toks = window_toks[len(left_context_toks) if left_context_toks else 0:
+                                  -len(right_context_toks) if right_context_toks else None]
+        out_toks += window_toks
+        
+        window_text = detokenize(model_type, window_toks, window_spacing, window_capitalization)
+        print(window_text, end='')
+        
+        # Advance the window and the end of the left context
+        left_context_toks += window_toks
+        left_context_toks = [tok for tok in left_context_toks if tok not in ('{', '}')]
+        left_context_size += window_size
+        spacing_idx += num_non_word_pieces
+        i = window_end
+        
+        # Advance the beginning of the left context
+        while left_context_size > context_size:
+            left_context_toks = left_context_toks[1:]
+            if not is_word_piece(model_type, left_context_toks[0]):
+                left_context_size -= 1
+        while left_context_toks and is_word_piece(model_type, left_context_toks[0]):
+            left_context_toks = left_context_toks[1:]
+        left_context_text = tokenizer.convert_tokens_to_string(left_context_toks)
+        left_context_text = left_context_text.replace('{', '').replace('}', '')
+    return tokenizer.convert_tokens_to_string(out_toks)
 
 # Bouts-rimés (rhymed ends) is an old French pastime in which one person selects
 # series of rhyming words and another person composes a poem using them. This
