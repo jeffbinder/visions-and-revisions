@@ -447,7 +447,7 @@ def adjust_probs(model, probs, tokenized_text, start, end, masked_indices,
                 test_meter = get_meter(get_pron(match_meter[k]))
                 meter_tensor = meter_dict[test_meter].to(device)
                 if allow_punctuation is True:
-                    adj_probs[k][j] *= (meter_tensor + meter_dict['p'])
+                    adj_probs[k][j] *= (meter_tensor + meter_dict['p'].to(device))
                 else:
                     adj_probs[k][j] *= meter_tensor
 
@@ -927,6 +927,7 @@ def parody(text, match_meter=False, match_rhyme=False, topic=None,
     global tokenizer
     tokenizer = GPT2Tokenizer.from_pretrained(model_type)
     model = GPT2LMHeadModel.from_pretrained(model_type)
+    model.to(device)
     model.eval()
     eos_token = tokenizer.eos_token
     
@@ -953,7 +954,7 @@ def parody(text, match_meter=False, match_rhyme=False, topic=None,
     
     # As in Beckett's "The Unnamable," we force the model to keep writing
     # even when it wants to stop.
-    discouraged_words = torch.ones((vocab_size,))
+    discouraged_words = torch.ones((vocab_size,)).to(device)
     eos_token_id = tokenizer.convert_tokens_to_ids([eos_token])[0]
     discouraged_words[eos_token_id] = 0.0
     newline_token_id = tokenizer.convert_tokens_to_ids(['\n'])[0]
@@ -994,7 +995,7 @@ def parody(text, match_meter=False, match_rhyme=False, topic=None,
             meter = None
             
         with torch.no_grad():
-            tokens_tensor = torch.tensor([out_toks])
+            tokens_tensor = torch.tensor([out_toks]).to(device)
             outputs = model(tokens_tensor)
             predictions = outputs[0]
             
