@@ -672,6 +672,9 @@ def depoeticize(text, max_iterations=100,
                 allow_punctuation=None, sequential=False, verbose=True):
     stopwords = set(stopwords)
 
+    if modifier is not None:
+        modifier = modifier()
+
     initialize_model(model_type, model_path)
     initialize_rhyme_and_meter(model_type, meter=match_meter or allow_punctuation is not None,
                                rhymes=match_rhyme)
@@ -923,6 +926,9 @@ def parody(text, match_meter=False, match_rhyme=False, topic=None,
            randomize=False, modifier=None, verbose=True,
            topic_prefix="", model='gpt2'):
     model_type = model
+
+    if modifier is not None:
+        modifier = modifier()
     
     global tokenizer
     tokenizer = GPT2Tokenizer.from_pretrained(model_type)
@@ -1045,7 +1051,7 @@ def parody(text, match_meter=False, match_rhyme=False, topic=None,
     text = tokenizer.convert_tokens_to_string(out)
     return tokenizer.clean_up_tokenization(text)
 
-# Add modifier=metalness_modifier() to bias the results toward words that occur
+# Add modifier=metalness_modifier to bias the results toward words that occur
 # frequently in heavy metal lyrics. First you will need to download the data set
 # available at https://github.com/ijmbarr/pythonic-metal.
 def metalness_modifier():
