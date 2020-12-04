@@ -1,9 +1,11 @@
 import json
+import math
 import pickle
 import random
 import re
 
 import numpy
+import scipy
 from scipy import sparse
 import torch
 from transformers import BertTokenizer, BertForMaskedLM
@@ -669,7 +671,8 @@ def depoeticize(text, max_iterations=100,
                 discourage_repetition=False, stopwords=stopwords.words('english'),
                 model_type='bert-base-uncased', model_path=None,
                 preserve_spacing_and_capitalization=False,
-                allow_punctuation=None, sequential=False, verbose=True):
+                allow_punctuation=None, sequential=False, verbose=True,
+                output_metric=None, outfile=None):
     stopwords = set(stopwords)
 
     if modifier is not None:
@@ -703,6 +706,15 @@ def depoeticize(text, max_iterations=100,
 
     forbidden_texts = {}
 
+    if output_metric is not None:
+        outfile = open(outfile, 'w')
+        outfile.write(f'''
+<!DOCTYPE html>
+<html>
+<head></head>
+<body>
+''')
+
     if sequential:
         max_iterations = len(toks2)
     for k in range(max_iterations):
@@ -724,7 +736,7 @@ def depoeticize(text, max_iterations=100,
             discouraged_words = None
         
         # Compute the scores used to choose which word to change
-        outputs = [(None, None, float("inf"))] * n
+        outputs = [(None, None, float("inf"), None)] * n
         if sequential:
             test_range = [start + k]
         else:
@@ -786,7 +798,8 @@ def depoeticize(text, max_iterations=100,
             else:
                 topicless_probs1 = None
                 topicless_probs2 = None
-                
+
+            raw_probs = m(probs2[0][0])
             if not sequential:
                 probs1 = adjust_probs(model, probs1, tokenized_text, start,
                                       end, indices, modifier,
@@ -808,12 +821,57 @@ def depoeticize(text, max_iterations=100,
                 = compute_score_for_tokens(probs1, probs2,
                                            tokenized_text, indices,
                                            relative=True)
-            outputs[i] = (indices, predicted_tokens, score)
+            outputs[i] = (indices, predicted_tokens, score, raw_probs)
+            
+        # Output a visualization of the selected metric.
+        if output_metric is not None:
+            vals = []
+            min_val = float("inf")
+            max_val = 0
+            for indices, predicted_tokens, score, probs in outputs:
+                if output_metric == 'entropy':
+                    if probs is None:
+                        val = 0
+                    else:
+                        val = scipy.stats.entropy(probs)
+                elif output_metric == 'score':
+                    if score == float("inf"):
+                        val = 0
+                    else:
+                        val = -math.log(score)
+                if val < min_val:
+                    min_val = val
+                if val > max_val:
+                    max_val = val
+                vals.append(val)
+            print(vals)
+
+            html = ""
+            for i, val in enumerate(vals):
+                if i in multipart_words:
+                    i1, i2 = multipart_words[i]
+                    if i > i1:
+                        continue
+                else:
+                    i1 = i
+                    i2 = i
+                s = tokenizer.convert_tokens_to_string(tokenized_text[i1:i2+1])
+                val_relative = (val - min_val) / (max_val - min_val)
+                color = hex(int((1.0 - val_relative) * 255))[2:].zfill(2)
+                if output_metric == 'entropy':
+                    color = f"#FF{color}{color}"
+                elif output_metric == 'score':
+                    color = f"#FFFF{color}"
+                html += f"<span style='background-color: {color}'>{s}</span> "
+            html += "<hr />\n"
+
+            outfile.write(html)
+            outfile.flush()
 
         # Choose a word to change
         outputs.sort(key=lambda t: t[2])
         chosen_indices = None
-        for (indices, predicted_tokens, score) in outputs:
+        for (indices, predicted_tokens, score, _) in outputs:
             if score >= stop_score:
                 break
             if predicted_tokens is None:
@@ -913,6 +971,10 @@ def depoeticize(text, max_iterations=100,
 
         if randomize and cooldown:
             randomize *= (1.0 - cooldown)
+
+    if output_metric is not None:
+        outfile.write("</body></html>\n")
+        outfile.flush()
             
     if preserve_spacing_and_capitalization:
         text = detokenize(model_type, tokenized_text[start:-end], spacing, capitalization)
@@ -1294,3 +1356,4 @@ def bouts_rimés(rhymes, meter='u-u-u-u-u-',
                        model_type=model_type, model_path=model_path,
                        allow_punctuation=None,
                        sequential=sequential, verbose=verbose)
+
