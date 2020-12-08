@@ -1000,6 +1000,7 @@ def parody(text, match_meter=False, match_rhyme=False, topic=None,
     eos_token = tokenizer.eos_token
     
     initialize_rhyme_and_meter(model_type, meter=True, rhymes=match_rhyme)
+    eol_token = tokenizer.convert_tokens_to_ids(['Ġ'])[0]
 
     if topic:
         toks1 = tokenizer.tokenize("{0} {1} {2}. "
@@ -1038,6 +1039,11 @@ def parody(text, match_meter=False, match_rhyme=False, topic=None,
             out_toks.append(tok)
             tok = tokenizer.convert_ids_to_tokens([tok])[0]
             just_added_punctuation = is_punctuation(tok)
+            i += 1
+            continue
+
+        if indexed_tokens[i] == eol_token:
+            out_toks.append(eol_token)
             i += 1
             continue
             
@@ -1109,6 +1115,8 @@ def parody(text, match_meter=False, match_rhyme=False, topic=None,
             string = tokenizer.convert_tokens_to_string([tok])
             print(string, end='')
 
+    if verbose:
+        print('')
     out = tokenizer.convert_ids_to_tokens(out_toks[start:])
     text = tokenizer.convert_tokens_to_string(out)
     return tokenizer.clean_up_tokenization(text)
