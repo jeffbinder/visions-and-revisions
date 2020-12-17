@@ -148,7 +148,7 @@ def scan_tokenization(model, text, toks):
     spacing.append(current_spacing)
     return (spacing, capitalization)
     
-def detokenize(model, toks, spacing, capitalization):
+def detokenize(model, toks, spacing, capitalization, html=False):
     text = ''
     i = 0
     j = 0
@@ -161,10 +161,20 @@ def detokenize(model, toks, spacing, capitalization):
                 tok = tok.upper()
         else:
             current_spacing = spacing[j]
+            if html:
+                current_spacing = current_spacing.replace(' ', '&nbsp;')
             text += current_spacing
             current_capitalization = capitalization[j]
             if current_capitalization in ('upper_initial', 'upper_ambiguous'):
-                tok = tok[0].upper() + tok[1:]
+                if tok.startswith('<span'):
+                    # Special case for HTML visualization
+                    i1 = tok.index('>')+1
+                    tok = tok[:i1] + tok[i1].upper() + tok[i1+1:]
+                elif tok[0] == '<' and tok[-1] == '>':
+                    # Special case for tokens marked as just modified
+                    tok = tok[0] + tok[1].upper() + tok[2:]
+                else:
+                    tok = tok[0].upper() + tok[1:]
             elif current_capitalization == 'upper_all':
                 tok = tok.upper()
             j += 1
@@ -670,7 +680,7 @@ def depoeticize(text, max_iterations=100,
                 strong_topic_bias=False, stop_score=1.0,
                 discourage_repetition=False, stopwords=stopwords.words('english'),
                 model_type='bert-base-uncased', model_path=None,
-                preserve_spacing_and_capitalization=False,
+                preserve_spacing_and_capitalization=True,
                 allow_punctuation=None, sequential=False, verbose=True,
                 output_metric=None, outfile=None):
     stopwords = set(stopwords)
@@ -701,8 +711,7 @@ def depoeticize(text, max_iterations=100,
     n = len(tokenized_text)
     
     if preserve_spacing_and_capitalization:
-        print("The preserve_spacing_and_capitalization feature is not yet implemented!")
-        spacing, capitalization = scan_tokenization(model_type, text, tokenized_text)
+        spacing, capitalization = scan_tokenization(model_type, text, toks2)
 
     forbidden_texts = {}
 
@@ -847,7 +856,8 @@ def depoeticize(text, max_iterations=100,
             print(vals)
 
             html = ""
-            for i, val in enumerate(vals):
+            viz_toks = []
+            for i, val in list(enumerate(vals))[start:-end]:
                 if i in multipart_words:
                     i1, i2 = multipart_words[i]
                     if i > i1:
@@ -863,7 +873,12 @@ def depoeticize(text, max_iterations=100,
                 elif output_metric == 'score':
                     color = hex(int((1.0 - val_relative*0.6) * 255))[2:].zfill(2)
                     color = f"#{color}{color}FF"
-                html += f"<span style='background-color: {color}'>{s}</span> "
+                viz_toks.append(f"<span style='background-color: {color}'>{s}</span>")
+            if preserve_spacing_and_capitalization:
+                html = detokenize(model_type, viz_toks, spacing, capitalization, html=True)
+            else:
+                html = tokenizer.clean_up_tokenization(tokenizer.convert_tokens_to_string(viz_toks))
+            html = html.replace('\n', '<br />')
             html += "<hr />\n"
 
             outfile.write(html)
@@ -1255,8 +1270,8 @@ def banalify(text, window_size=10, context_size=10,
                                           forbid_reversions, preserve_punctuation,
                                           strong_topic_bias, stop_score,
                                           discourage_repetition, stopwords,
-                                          model_type, model_path,
-                                          allow_punctuation, sequential, False, verbose)
+                                          model_type, model_path, False,
+                                          allow_punctuation, sequential, verbose)
         
         # Trim off the previous and next windows from the output
         window_toks = tokenizer.tokenize(contextualized_text)
