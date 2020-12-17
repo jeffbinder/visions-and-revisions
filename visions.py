@@ -857,11 +857,12 @@ def depoeticize(text, max_iterations=100,
                     i2 = i
                 s = tokenizer.convert_tokens_to_string(tokenized_text[i1:i2+1])
                 val_relative = (val - min_val) / (max_val - min_val)
-                color = hex(int((1.0 - val_relative) * 255))[2:].zfill(2)
                 if output_metric == 'entropy':
+                    color = hex(int((1.0 - val_relative) * 255))[2:].zfill(2)
                     color = f"#FF{color}{color}"
                 elif output_metric == 'score':
-                    color = f"#FFFF{color}"
+                    color = hex(int((1.0 - val_relative*0.6) * 255))[2:].zfill(2)
+                    color = f"#{color}{color}FF"
                 html += f"<span style='background-color: {color}'>{s}</span> "
             html += "<hr />\n"
 
