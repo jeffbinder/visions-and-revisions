@@ -853,7 +853,6 @@ def depoeticize(text, max_iterations=100,
                 if val > max_val:
                     max_val = val
                 vals.append(val)
-            print(vals)
 
             html = ""
             viz_toks = []
