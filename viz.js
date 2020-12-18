@@ -49,7 +49,18 @@ function showPopup(e) {
     var options = JSON.parse(el.attr("data-options"));
     var entropy = el.attr('data-entropy');
     var score = el.attr('data-score');
-    // TODO
+    var replacements = JSON.parse(el.attr('data-replacements'));
+    $(".box").remove();
+    var html = "<div class='box'>Top prediction: " + replacements.join('/') + "<br />";
+    html += "Score: " + Number(score).toFixed(3) + "<hr /><table>";
+    for (var i = 0; i < options.length; i++) {
+	html += "<tr><td>";
+	html += options[i][0];
+	html += "</td><td><div class='bar' style='width: " + options[i][1] * 300 + "px'>&nbsp;</div>";
+	html += "</td></tr>";
+    }
+    html += "</table>Entropy: " + Number(entropy).toFixed(3) + "</div>";
+    $("body").append(html);
 }
 
 $(function () {

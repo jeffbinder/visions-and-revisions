@@ -729,7 +729,7 @@ def depoeticize(text, max_iterations=100,
 <script src='viz.js'></script>
 </head>
 <body>
-Model: {model_type}{' at ' + model_path if model_path else ''}<br />
+Model: {model_type}{' "' + model_path + '"' if model_path else ''}<br />
 Max iterations: {max_iterations}<br />
 '''
         if strong_topic_bias:
@@ -768,7 +768,7 @@ Highlight: <select name="highlighting" id="highlighting">
   <option>None</option>
 </select>
 <input type="checkbox" id="changes" name="changes" value="Changes">
-<label for="changes"> Indicate changes</label><hr />'''
+<label for="changes"> Indicate changes</label><br />Double-click on words to see predictions<hr />'''
 
         outfile.write(html)
 
@@ -938,7 +938,8 @@ Highlight: <select name="highlighting" id="highlighting">
                     top_options = json.dumps(top_options)
                 else:
                     top_options = 'null'
-                viz_toks.append(f"<span class='tok{changed}' data-entropy='{entropy}' data-score='{score_val}' data-entropy-relative='{entropy_relative}' data-score-relative='{score_relative}' data-options='{top_options}'>{s}</span>")
+                replacement_tokens = json.dumps(outputs[i][1])
+                viz_toks.append(f"<span class='tok{changed}' data-entropy='{entropy}' data-score='{score_val}' data-entropy-relative='{entropy_relative}' data-score-relative='{score_relative}' data-options='{top_options}' data-replacements='{replacement_tokens}'>{s}</span>")
             if preserve_spacing_and_capitalization:
                 html += detokenize(model_type, viz_toks, spacing, capitalization, html=True)
             else:

@@ -1,0 +1,11 @@
+.box {
+    position: fixed;
+    top: 200px;
+    right: 100px;
+    border: 1px solid black;
+    padding: 5px;
+    background-color: white;
+}
+.bar {
+    background-color: red;
+}
