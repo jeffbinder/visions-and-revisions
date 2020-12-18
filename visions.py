@@ -109,6 +109,9 @@ def scan_tokenization(model, text, toks):
     current_capitalization = None
     while char_idx < len(text):
         char = text[char_idx]
+        if char == '{' or char == '}':
+            char_idx += 1
+            continue
         word_piece = False
         try:
             tok = toks[tok_idx]
@@ -682,7 +685,7 @@ def depoeticize(text, max_iterations=100,
                 model_type='bert-base-uncased', model_path=None,
                 preserve_spacing_and_capitalization=True,
                 allow_punctuation=None, sequential=False, verbose=True,
-                output_metric=None, outfile=None):
+                outfile=None, top_n=10):
     stopwords = set(stopwords)
 
     if modifier is not None:
@@ -715,17 +718,63 @@ def depoeticize(text, max_iterations=100,
 
     forbidden_texts = {}
 
-    if output_metric is not None:
+    if outfile is not None:
         outfile = open(outfile, 'w')
-        outfile.write(f'''
+        html = f'''
 <!DOCTYPE html>
 <html>
-<head></head>
+<head>
+<link rel="stylesheet" href="viz.css">
+<script src='jquery.js'></script>
+<script src='viz.js'></script>
+</head>
 <body>
-''')
+Model: {model_type}{' at ' + model_path if model_path else ''}<br />
+Max iterations: {max_iterations}<br />
+'''
+        if strong_topic_bias:
+            html += f'Strong topic bias: {strong_topic_bias}<br />'
+        if randomize:
+            html += f'Randomizing, cooldown={cooldown}<br />'
+        if stop_score != 1.0:
+            html += f'Stop score: {stop_score}<br />'
+        if match_meter:
+            html += 'Matching meter<br />'
+        if match_rhyme:
+            html += 'Matching rhyme<br />'
+        if forbid_reversions:
+            html += 'Forbidding reversions<br />'
+        if preserve_punctuation:
+            html += 'Preserving punctuation<br />'
+        if discourage_repetition:
+            html += 'Discouraging repetition<br />'
+        if allow_punctuation is True:
+            html += 'Always allowing punctuation<br />'
+        if allow_punctuation is False:
+            html += 'Never allowing punctuation<br />'
+        if modifier:
+            html += 'Modifier provided<br />'
+        if sequential:
+            html += 'Running in sequential mode<br />'
+        html += '<hr />'
+        if title:
+            html += f'Title: {title}<br />'
+        if author:
+            html += f'Author: {author}<br />'
+        html += '''<hr />
+Highlight: <select name="highlighting" id="highlighting">
+  <option>Score</option>
+  <option>Entropy</option>
+  <option>None</option>
+</select>
+<input type="checkbox" id="changes" name="changes" value="Changes">
+<label for="changes"> Indicate changes</label><hr />'''
+
+        outfile.write(html)
 
     if sequential:
         max_iterations = len(toks2)
+    new_token_indices = []
     for k in range(max_iterations):
         last_score = 0.0
         
@@ -832,31 +881,35 @@ def depoeticize(text, max_iterations=100,
                                            relative=True)
             outputs[i] = (indices, predicted_tokens, score, raw_probs)
             
-        # Output a visualization of the selected metric.
-        if output_metric is not None:
+        # Output an HTML visualization.
+        if outfile is not None:
             vals = []
-            min_val = float("inf")
-            max_val = 0
+            min_entropy = float("inf")
+            max_entropy = 0
+            min_score = float("inf")
+            max_score = 0
             for indices, predicted_tokens, score, probs in outputs:
-                if output_metric == 'entropy':
-                    if probs is None:
-                        val = 0
-                    else:
-                        val = scipy.stats.entropy(probs)
-                elif output_metric == 'score':
-                    if score == float("inf"):
-                        val = 0
-                    else:
-                        val = -math.log(score)
-                if val < min_val:
-                    min_val = val
-                if val > max_val:
-                    max_val = val
-                vals.append(val)
+                if probs is None:
+                    entropy = 0
+                else:
+                    entropy = scipy.stats.entropy(probs)
+                if entropy < min_entropy:
+                    min_entropy = entropy
+                if entropy > max_entropy:
+                    max_entropy = entropy
+                if score == float("inf"):
+                    score_val = 0
+                else:
+                    score_val = -math.log(score)
+                if score_val < min_score:
+                    min_score = score_val
+                if score_val > max_score:
+                    max_score = score_val
+                vals.append((entropy, score_val))
 
-            html = ""
+            html = "<div class='iter'>"
             viz_toks = []
-            for i, val in list(enumerate(vals))[start:-end]:
+            for i, (entropy, score_val) in list(enumerate(vals))[start:-end]:
                 if i in multipart_words:
                     i1, i2 = multipart_words[i]
                     if i > i1:
@@ -865,20 +918,33 @@ def depoeticize(text, max_iterations=100,
                     i1 = i
                     i2 = i
                 s = tokenizer.convert_tokens_to_string(tokenized_text[i1:i2+1])
-                val_relative = (val - min_val) / (max_val - min_val)
-                if output_metric == 'entropy':
-                    color = hex(int((1.0 - val_relative) * 255))[2:].zfill(2)
-                    color = f"#FF{color}{color}"
-                elif output_metric == 'score':
-                    color = hex(int((1.0 - val_relative*0.6) * 255))[2:].zfill(2)
-                    color = f"#{color}{color}FF"
-                viz_toks.append(f"<span style='background-color: {color}'>{s}</span>")
+                if max_entropy == min_entropy:
+                    entropy_relative = 0.0
+                else:
+                    entropy_relative = (entropy - min_entropy) / (max_entropy - min_entropy)
+                if max_score == min_score:
+                    score_relative = 0.0
+                else:
+                    score_relative = (score_val - min_score) / (max_score - min_score)
+                changed = i in new_token_indices
+                changed = " changed-tok" if changed else ""
+                raw_probs = outputs[i][3]
+                if raw_probs is not None:
+                    out = torch.topk(raw_probs, top_n)
+                    top_options = zip(out.indices, out.values)
+                    top_options = [(tokenizer.convert_ids_to_tokens([i])[0],
+                                    float(p))
+                                   for i, p in top_options]
+                    top_options = json.dumps(top_options)
+                else:
+                    top_options = 'null'
+                viz_toks.append(f"<span class='tok{changed}' data-entropy='{entropy}' data-score='{score_val}' data-entropy-relative='{entropy_relative}' data-score-relative='{score_relative}' data-options='{top_options}'>{s}</span>")
             if preserve_spacing_and_capitalization:
-                html = detokenize(model_type, viz_toks, spacing, capitalization, html=True)
+                html += detokenize(model_type, viz_toks, spacing, capitalization, html=True)
             else:
-                html = tokenizer.clean_up_tokenization(tokenizer.convert_tokens_to_string(viz_toks))
+                html += tokenizer.clean_up_tokenization(tokenizer.convert_tokens_to_string(viz_toks))
             html = html.replace('\n', '<br />')
-            html += "<hr />\n"
+            html += "</div><hr />\n"
 
             outfile.write(html)
             outfile.flush()
@@ -987,7 +1053,7 @@ def depoeticize(text, max_iterations=100,
         if randomize and cooldown:
             randomize *= (1.0 - cooldown)
 
-    if output_metric is not None:
+    if outfile is not None:
         outfile.write("</body></html>\n")
         outfile.flush()
             
@@ -995,6 +1061,7 @@ def depoeticize(text, max_iterations=100,
         text = detokenize(model_type, tokenized_text[start:-end], spacing, capitalization)
     else:
         text = tokenizer.clean_up_tokenization(tokenizer.convert_tokens_to_string(tokenized_text[start:-end]))
+
     return text
 
 # Generates a wholly new text by running a decoder model forward with the specified
