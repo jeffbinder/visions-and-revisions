@@ -794,7 +794,7 @@ Highlight: <select name="highlighting" id="highlighting">
             discouraged_words = None
         
         # Compute the scores used to choose which word to change
-        outputs = [(None, None, float("inf"), None)] * n
+        outputs = [(None, None, float("inf"), None, None, None)] * n
         if sequential:
             test_range = [start + k]
         else:
@@ -858,6 +858,7 @@ Highlight: <select name="highlighting" id="highlighting">
                 topicless_probs2 = None
 
             raw_probs = m(probs2[0][0])
+            raw_topicless_probs = topicless_probs2 and m(topicless_probs2[0][0])
             if not sequential:
                 probs1 = adjust_probs(model, probs1, tokenized_text, start,
                                       end, indices, modifier,
@@ -875,11 +876,13 @@ Highlight: <select name="highlighting" id="highlighting">
                          strong_topic_bias=strong_topic_bias,
                          topicless_probs=strong_topic_bias and topicless_probs2)
             
+            adjusted_probs = probs2[0][0]
             predicted_tokens, score \
                 = compute_score_for_tokens(probs1, probs2,
                                            tokenized_text, indices,
                                            relative=True)
-            outputs[i] = (indices, predicted_tokens, score, raw_probs)
+            outputs[i] = (indices, predicted_tokens, score, raw_topicless_probs,
+                          raw_probs, adjusted_probs)
             
         # Output an HTML visualization.
         if outfile is not None:
@@ -888,15 +891,19 @@ Highlight: <select name="highlighting" id="highlighting">
             max_entropy = 0
             min_score = float("inf")
             max_score = 0
-            for indices, predicted_tokens, score, probs in outputs:
-                if probs is None:
-                    entropy = 0
-                else:
-                    entropy = scipy.stats.entropy(probs)
-                if entropy < min_entropy:
-                    min_entropy = entropy
-                if entropy > max_entropy:
-                    max_entropy = entropy
+            for indices, predicted_tokens, score, probs1, probs2, probs3 in outputs:
+                def get_entropy(probs):
+                    if probs is None:
+                        return 0
+                    else:
+                        return scipy.stats.entropy(probs)
+                entropy1 = get_entropy(probs1)
+                entropy2 = get_entropy(probs2)
+                entropy3 = get_entropy(probs3)
+                if entropy1 < min_entropy:
+                    min_entropy = entropy1
+                if entropy1 > max_entropy:
+                    max_entropy = entropy1
                 if score == float("inf"):
                     score_val = 0
                 else:
@@ -905,11 +912,11 @@ Highlight: <select name="highlighting" id="highlighting">
                     min_score = score_val
                 if score_val > max_score:
                     max_score = score_val
-                vals.append((entropy, score_val))
+                vals.append((entropy1, entropy2, entropy3, score_val))
 
             html = "<div class='iter'>"
             viz_toks = []
-            for i, (entropy, score_val) in list(enumerate(vals))[start:-end]:
+            for i, (entropy1, entropy2, entropy3, score_val) in list(enumerate(vals))[start:-end]:
                 if i in multipart_words:
                     i1, i2 = multipart_words[i]
                     if i > i1:
@@ -921,7 +928,7 @@ Highlight: <select name="highlighting" id="highlighting">
                 if max_entropy == min_entropy:
                     entropy_relative = 0.0
                 else:
-                    entropy_relative = (entropy - min_entropy) / (max_entropy - min_entropy)
+                    entropy_relative = (entropy1 - min_entropy) / (max_entropy - min_entropy)
                 if max_score == min_score:
                     score_relative = 0.0
                 else:
@@ -929,17 +936,23 @@ Highlight: <select name="highlighting" id="highlighting">
                 changed = i in new_token_indices
                 changed = " changed-tok" if changed else ""
                 raw_probs = outputs[i][3]
-                if raw_probs is not None:
-                    out = torch.topk(raw_probs, top_n)
+                raw_topicless_probs = outputs[i][4]
+                adjusted_probs = outputs[i][5]
+                def get_top(probs):
+                    if probs is None:
+                        return 'null'
+                    out = torch.topk(probs, top_n)
                     top_options = zip(out.indices, out.values)
                     top_options = [(tokenizer.convert_ids_to_tokens([i])[0],
                                     float(p))
                                    for i, p in top_options]
                     top_options = json.dumps(top_options)
-                else:
-                    top_options = 'null'
+                    return top_options
+                options1 = get_top(raw_probs)
+                options2 = get_top(raw_topicless_probs)
+                options3 = get_top(adjusted_probs)
                 replacement_tokens = json.dumps(outputs[i][1])
-                viz_toks.append(f"<span class='tok{changed}' data-entropy='{entropy}' data-score='{score_val}' data-entropy-relative='{entropy_relative}' data-score-relative='{score_relative}' data-options='{top_options}' data-replacements='{replacement_tokens}'>{s}</span>")
+                viz_toks.append(f"<span class='tok{changed}' data-entropy1='{entropy1}' data-entropy2='{entropy2}' data-entropy3='{entropy3}' data-score='{score_val}' data-entropy-relative='{entropy_relative}' data-score-relative='{score_relative}' data-options1='{options1}' data-options2='{options2}' data-options3='{options3}' data-replacements='{replacement_tokens}'>{s}</span>")
             if preserve_spacing_and_capitalization:
                 html += detokenize(model_type, viz_toks, spacing, capitalization, html=True)
             else:
@@ -953,7 +966,7 @@ Highlight: <select name="highlighting" id="highlighting">
         # Choose a word to change
         outputs.sort(key=lambda t: t[2])
         chosen_indices = None
-        for (indices, predicted_tokens, score, _) in outputs:
+        for indices, predicted_tokens, score, _, _, _ in outputs:
             if score >= stop_score:
                 break
             if predicted_tokens is None:

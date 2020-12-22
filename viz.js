@@ -46,20 +46,33 @@ function hideChanges() {
 
 function showPopup(e) {
     var el = $(e.target);
-    var options = JSON.parse(el.attr("data-options"));
-    var entropy = el.attr('data-entropy');
     var score = el.attr('data-score');
     var replacements = JSON.parse(el.attr('data-replacements'));
     $(".box").remove();
     var html = "<div class='box'>Top prediction: " + replacements.join('/') + "<br />";
-    html += "Score: " + Number(score).toFixed(3) + "<hr /><table>";
-    for (var i = 0; i < options.length; i++) {
-	html += "<tr><td>";
-	html += options[i][0];
-	html += "</td><td><div class='bar' style='width: " + options[i][1] * 300 + "px'>&nbsp;</div>";
-	html += "</td></tr>";
+    html += "Score: " + Number(score).toFixed(3) + "<hr /><table class='graph-holder'><tr>";
+    for (var k = 1; k <= 3; k++) {
+	var options = JSON.parse(el.attr("data-options" + k));
+	var entropy = el.attr('data-entropy' + k);
+	if (options == null) continue;
+	html += "<td><table>";
+	if (k == 1) html += "No topic: <br />";
+	if (k == 2) html += "With topic: <br />";
+	if (k == 3) html += "Constrained: <br />";
+	var max = 0.0;
+	for (var i = 0; i < options.length; i++) {
+	    var p = parseFloat(options[i][1]);
+	    if (p > max) max = p;
+	}
+	for (var i = 0; i < options.length; i++) {
+	    html += "<tr><td>";
+	    html += options[i][0];
+	    html += "</td><td><div class='bar' style='width: " + (options[i][1] / max) * 40 + "px'>&nbsp;</div>";
+	    html += "</td></tr>";
+	}
+	html += "</table>Entropy: " + Number(entropy).toFixed(3) + "</td>";
     }
-    html += "</table>Entropy: " + Number(entropy).toFixed(3) + "</div>";
+    html += "</tr></table></div>";
     $("body").append(html);
 }
 

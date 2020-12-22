@@ -6,6 +6,10 @@
     padding: 5px;
     background-color: white;
 }
+.graph-holder  {
+    border-spacing: 10px;
+    border-collapse: separate;
+}
 .bar {
     background-color: red;
 }
