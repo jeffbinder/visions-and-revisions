@@ -107,6 +107,7 @@ def scan_tokenization(model, text, toks):
     tok_char_idx = 0
     current_spacing = ''
     current_capitalization = None
+    after_apostrophe = False
     while char_idx < len(text):
         char = text[char_idx]
         if char == '{' or char == '}':
@@ -115,7 +116,8 @@ def scan_tokenization(model, text, toks):
         word_piece = False
         try:
             tok = toks[tok_idx]
-            if is_word_piece(model, tok):
+            if is_word_piece(model, tok) or tok == "'" or \
+                    (after_apostrophe and tok in ("s", "d", "st", "ve", "re", "nt", "ll", "t", "m")):
                 tok = join_word_pieces([tok])
                 word_piece = True
         except IndexError:
@@ -148,6 +150,7 @@ def scan_tokenization(model, text, toks):
         elif tok_char_idx == 0:
             current_spacing += char
             char_idx += 1
+        after_apostrophe = tok == "'"
     spacing.append(current_spacing)
     return (spacing, capitalization)
     
@@ -156,9 +159,11 @@ def detokenize(model, toks, spacing, capitalization, html=False):
     i = 0
     j = 0
     current_capitalization = None
+    after_apostrophe = False
     while i < len(toks):
         tok = toks[i]
-        if is_word_piece(model, tok):
+        if is_word_piece(model, tok) or tok == "'" or \
+                    (after_apostrophe and tok in ("s", "d", "st", "ve", "re", "nt", "ll", "t", "m")):
             tok = join_word_pieces([tok])
             if current_capitalization == 'upper_all':
                 tok = tok.upper()
@@ -183,6 +188,7 @@ def detokenize(model, toks, spacing, capitalization, html=False):
             j += 1
         text += tok
         i += 1
+        after_apostrophe = tok == "'"
     text += spacing[-1]
     return text
 
@@ -615,8 +621,8 @@ def process_text(model, text, start, end, match_rhyme, strip_punctuation=False):
         word_bounds = []
         after_apostrophe = False
         for i, tok in enumerate(line_toks):
-            if is_word_piece(model, tok) or \
-                    (after_apostrophe and tok in ("'", "s", "d", "st", "ve", "re", "nt", "ll", "t", "m")):
+            if is_word_piece(model, tok) or tok == "'" or \
+                    (after_apostrophe and tok in ("s", "d", "st", "ve", "re", "nt", "ll", "t", "m")):
                 if not word_bounds:
                     word_bounds.append([i, i])
                 else:
@@ -695,16 +701,16 @@ def depoeticize(text, max_iterations=100,
     initialize_rhyme_and_meter(model_type, meter=match_meter or allow_punctuation is not None,
                                rhymes=match_rhyme)
 
-    if title:
-        toks1 = tokenizer.tokenize("{0}The following poem is titled {1}:\n****\n"
-                                   .format(bos_token, title))
+    topicless_toks1 = tokenizer.tokenize(f'{bos_token}Title: [MASK] / Author: [MASK] [MASK] / Text: \n\n')
+    if title and author:
+        toks1 = tokenizer.tokenize(f'{bos_token}Title: {title} / Author: {author} / Text: \n\n')
+    elif title:
+        toks1 = tokenizer.tokenize(f'{bos_token}Title: {title} / Author: [MASK] [MASK] / Text: \n\n')
+    elif author:
+        toks1 = tokenizer.tokenize(f'{bos_token}Title: [MASK] / Author: {author} / Text: \n\n')
     else:
-        toks1 = tokenizer.tokenize("{0}".format(bos_token))
-    if author:
-        toks3 = tokenizer.tokenize("\n****\nThe preceding poem is by {0}.\n{1}"
-                                   .format(author, eos_token))
-    else:
-        toks3 = tokenizer.tokenize("{0}".format(eos_token))
+        toks1 = [bos_token]
+    toks3 = [eos_token]
     start = len(toks1)
     end = len(toks3)
 
@@ -840,18 +846,18 @@ Highlight: <select name="highlighting" id="highlighting">
             # without the topic and biases the results in favor of words
             # that are more probable with it.
             if strong_topic_bias:
-                topicless_indices = [(i1-start, i2-start)
+                topicless_indices = [(i1-start+len(topicless_toks1), i2-start+len(topicless_toks1))
                                      for (i1, i2) in indices]
                 if sequential:
                     topicless_probs1 = None
                     topicless_probs2 \
                         = compute_replacement_probs_for_masked_tokens(model,
-                                                          tokenized_text[start:-end],
+                                                          topicless_toks1 + tokenized_text[start:-end] + [eos_token],
                                                           topicless_indices)
                 else:
                     topicless_probs1, topicless_probs2 \
                         = compute_probs_for_masked_tokens(model,
-                                                          tokenized_text[start:-end],
+                                                          topicless_toks1 + tokenized_text[start:-end] + [eos_token],
                                                           topicless_indices)
             else:
                 topicless_probs1 = None
@@ -896,14 +902,18 @@ Highlight: <select name="highlighting" id="highlighting">
                     if probs is None:
                         return 0
                     else:
-                        return scipy.stats.entropy(probs)
+                        return scipy.stats.entropy(probs.cpu())
                 entropy1 = get_entropy(probs1)
                 entropy2 = get_entropy(probs2)
                 entropy3 = get_entropy(probs3)
-                if entropy1 < min_entropy:
-                    min_entropy = entropy1
-                if entropy1 > max_entropy:
-                    max_entropy = entropy1
+                if title is not None:
+                    selected_entropy = entropy1
+                else:
+                    selected_entropy = entropy2
+                if selected_entropy < min_entropy:
+                    min_entropy = selected_entropy
+                if selected_entropy > max_entropy:
+                    max_entropy = selected_entropy
                 if score == float("inf"):
                     score_val = 0
                 else:
@@ -924,11 +934,15 @@ Highlight: <select name="highlighting" id="highlighting">
                 else:
                     i1 = i
                     i2 = i
-                s = tokenizer.convert_tokens_to_string(tokenized_text[i1:i2+1])
+                s = tokenizer.convert_tokens_to_string(tokenized_text[i1:i2+1]).replace(" ' ", "'")
                 if max_entropy == min_entropy:
                     entropy_relative = 0.0
                 else:
-                    entropy_relative = (entropy1 - min_entropy) / (max_entropy - min_entropy)
+                    if title is not None:
+                        selected_entropy = entropy1
+                    else:
+                        selected_entropy = entropy2
+                    entropy_relative = (selected_entropy - min_entropy) / (max_entropy - min_entropy)
                 if max_score == min_score:
                     score_relative = 0.0
                 else:
@@ -1020,7 +1034,7 @@ Highlight: <select name="highlighting" id="highlighting">
                 else:
                     fixed_toks_new.add(fixed_tok)
             fixed_toks = fixed_toks_new
-                
+            
             for i in range(i1, i2+1):
                 if i in multipart_words:
                     del multipart_words[i]

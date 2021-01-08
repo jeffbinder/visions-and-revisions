@@ -7,7 +7,7 @@ function showEntropy() {
     $('.tok').each(function (index, el) {
 	el = $(el);
 	var entropy = el.attr('data-entropy-relative');
-	var val = Math.floor(parseFloat(entropy) * 255);
+	var val = Math.floor(255 - parseFloat(entropy) * 255);
 	var color = "#FF" + hex(val) + hex(val);
 	el.css('background-color', color);
     });
@@ -57,7 +57,7 @@ function showPopup(e) {
 	if (options == null) continue;
 	html += "<td><table>";
 	if (k == 1) html += "No topic: <br />";
-	if (k == 2) html += "With topic: <br />";
+	if (k == 2) html += "Raw: <br />";
 	if (k == 3) html += "Constrained: <br />";
 	var max = 0.0;
 	for (var i = 0; i < options.length; i++) {
