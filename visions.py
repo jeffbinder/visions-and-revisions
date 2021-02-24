@@ -3,6 +3,7 @@ import math
 import pickle
 import random
 import re
+import time
 
 import numpy
 import scipy
@@ -264,6 +265,8 @@ def initialize_rhyme_and_meter(model, meter=False, rhymes=False):
             create_meter_dict(model)
             f = open(model + '_meter_dict.pkl', 'rb')
         word_pieces, meter_dict = pickle.load(f)
+        word_pieces = word_pieces.to(device)
+        meter_dict = {k: v.to(device) for k, v in meter_dict.items()}
     else:
         try:
             f = open(model + '_meter_dict.pkl', 'rb')
@@ -271,6 +274,7 @@ def initialize_rhyme_and_meter(model, meter=False, rhymes=False):
             create_meter_dict(model)
             f = open(model + '_meter_dict.pkl', 'rb')
         word_pieces, _ = pickle.load(f)
+        word_pieces = word_pieces.to(device)
     if rhymes:
         global rhyme_matrix
         try:
@@ -300,81 +304,109 @@ def initialize_model(model_type, model_path):
             model = model = RobertaForMaskedLM.from_pretrained(model_path or model_type)
             bos_token = tokenizer.bos_token
             eos_token = tokenizer.eos_token
+        model = torch.nn.DataParallel(model)
         model.to(device)
         model.eval()
 
 # Computes the model's predictions for a text with a given set of ranges
-# masked by single mask tokens.
-def compute_replacement_probs_for_masked_tokens(model, tokenized_text,
-                                                masked_indices):
-    n = len(masked_indices)
-    dim = [vocab_size] * n
-
-    tokenized_text = tokenized_text.copy()
-    shift = 0
-    for i1, i2 in masked_indices:
-        i1 -= shift
-        i2 -= shift
-        shift += (i2 - i1)
-        tokenized_text[i1:i2+1] = ['[MASK]']
-        
-    indexed_tokens = tokenizer.convert_tokens_to_ids(tokenized_text)
-    tokens_tensor = torch.tensor([indexed_tokens]).to(device)
-
-    with torch.no_grad():
-        outputs = model(tokens_tensor)
-        predictions = outputs[0]
-
-    replacement_probs = [None] * n
-    shift = 0
-    for k, (i1, i2) in enumerate(masked_indices):
-        i1 -= shift
-        i2 -= shift
-        shift += (i2 - i1)
-        replacement_probs[k] = [predictions[0, i1, :]]
-
-    return replacement_probs
-
-# Computes the model's predictions for a text with a given set of ranges
 # masked.
-def compute_probs_for_masked_tokens(model, tokenized_text, masked_indices):
-    n = len(masked_indices)
-    dim = [vocab_size] * n
+def compute_probs_for_masked_tokens(model, tokenized_texts, masked_index_lists, batch_size,
+                                    replacements_only=False):
+    indexed_tokens = []
+    tensor_indices = {}
+    wwm_tensor_indices = {}
+    for j1, (tokenized_text, masked_indices) in enumerate(zip(tokenized_texts, masked_index_lists)):
+        for j2, masked_index_set in enumerate(masked_indices):
+            n = len(masked_index_set)
+            multipart_words = False
+            tokens = tokenized_text.copy()
+            for i1, i2 in masked_index_set:
+                if i2 > i1:
+                    multipart_words = True
+                    if replacements_only:
+                        break
+                tokens[i1:i2+1] = ['[MASK]'] * (i2 - i1 + 1)
+            if not replacements_only or not multipart_words:
+                tensor_indices[(j1, j2)] = len(indexed_tokens)
+                indexed_tokens.append(tokenizer.convert_tokens_to_ids(tokens))
+            # If one of the ranges covers a multipart word, we need to compute probabilities
+            # both for the text with individual tokens masked and with the whole word masked.
+            if multipart_words:
+                wwm_tokens = tokenized_text.copy()
+                shift = 0
+                for i1, i2 in masked_index_set:
+                    i1 -= shift
+                    i2 -= shift
+                    shift += (i2 - i1)
+                    wwm_tokens[i1:i2+1] = ['[MASK]']
+                wwm_tensor_indices[(j1, j2)] = len(indexed_tokens)
+                indexed_tokens.append(tokenizer.convert_tokens_to_ids(wwm_tokens))
+    
+    # Add padding so all index sequences are the same length.
+    max_len = 0
+    for indices in indexed_tokens:
+        n = len(indices)
+        if n > max_len:
+            max_len = n
+    attention_mask = []
+    for i in range(len(indexed_tokens)):
+        n = len(indexed_tokens[i])
+        if n < max_len:
+            indexed_tokens[i] = indexed_tokens[i] + [0]*(max_len-n)
+        attention_mask.append([1]*n + [0]*(max_len-n))
+    tokens_tensor = torch.tensor(indexed_tokens)
+    attention_mask = torch.tensor(attention_mask)
 
-    multipart_words = False
-    tokenized_text = tokenized_text.copy()
-    for i1, i2 in masked_indices:
-        if i2 > i1:
-            multipart_words = True
-        tokenized_text[i1:i2+1] = ['[MASK]'] * (i2 - i1 + 1)
-
-    indexed_tokens = tokenizer.convert_tokens_to_ids(tokenized_text)
-    tokens_tensor = torch.tensor([indexed_tokens]).to(device)
-
-    with torch.no_grad():
-        outputs = model(tokens_tensor)
+    all_predictions = []
+    ntexts = tokens_tensor.shape[0]
+    nbatches = math.ceil(ntexts / batch_size)
+    for batchnum in range(nbatches):
+        batch_start = batchnum * batch_size
+        batch_end = min(batch_start + batch_size, ntexts)
+        with torch.no_grad():
+            outputs = model(tokens_tensor[batch_start:batch_end],
+                            attention_mask=attention_mask[batch_start:batch_end])
         predictions = outputs[0]
+        all_predictions.append(predictions)
+    del tokens_tensor
+    predictions = torch.cat(all_predictions, dim=0)
 
-    probs = [None] * n
-    for k, (i1, i2) in enumerate(masked_indices):
-        word_probs = []
-        for i in range(i1, i2+1):
-            word_probs.append(predictions[0, i, :])
-        probs[k] = word_probs
+    all_probs = []
+    all_replacement_probs = []
+    for j1, (tokenized_text, masked_indices) in enumerate(zip(tokenized_texts, masked_index_lists)):
+        probs = []
+        replacement_probs = []
+        for j2, masked_index_set in enumerate(masked_indices):
+            n = len(masked_index_set)
+            multipart_words = (j1, j2) in wwm_tensor_indices
+            if not replacements_only or not multipart_words:
+                j = tensor_indices[(j1, j2)]
+                index_set_probs = [None] * n
+                for k, (i1, i2) in enumerate(masked_index_set):
+                    word_probs = []
+                    for i in range(i1, i2+1):
+                        word_probs.append(predictions[j, i, :])
+                    index_set_probs[k] = word_probs
+                if not replacements_only:
+                    probs.append(index_set_probs)
+            if multipart_words:
+                j = wwm_tensor_indices[(j1, j2)]
+                index_set_probs = [None] * n
+                shift = 0
+                for k, (i1, i2) in enumerate(masked_index_set):
+                    i1 -= shift
+                    i2 -= shift
+                    shift += (i2 - i1)
+                    index_set_probs[k] = [predictions[j, i1, :]]
+            replacement_probs.append(index_set_probs)
+        all_probs.append(probs)
+        all_replacement_probs.append(replacement_probs)
+    del predictions
 
-    if multipart_words:
-        # We need to compute a separate probability with only one mask token
-        # for each word, so that we can replace the multipart words with
-        # single-part words.
-        replacement_probs \
-            = compute_replacement_probs_for_masked_tokens(model,
-                                                          tokenized_text,
-                                                          masked_indices)
-
+    if replacements_only:
+        return None, all_replacement_probs
     else:
-        replacement_probs = probs
-
-    return probs, replacement_probs
+        return all_probs, all_replacement_probs
 
 # Find words that could, if chosen for the masked indices, take us back to an
 # arrangement that has already been tried. Because we are compiling independent
@@ -443,7 +475,7 @@ def adjust_probs(model, probs, tokenized_text, start, end, masked_indices,
             # behaving reliably if we allow it to produce words that are not
             # actually in its vocabulary.
             if no_word_pieces:
-                adj_probs[k][j] *= (1.0 - word_pieces.to(device))
+                adj_probs[k][j] *= (1.0 - word_pieces)
                 
             if rhymable_only:
                 adj_probs[k][j] *= rhymable_words
@@ -462,13 +494,13 @@ def adjust_probs(model, probs, tokenized_text, start, end, masked_indices,
                 adj_probs[k][j] *= forbidden_words[k].to(device)
 
             if allow_punctuation is False:
-                adj_probs[k][j] *= (1.0 - meter_dict['p'].to(device))
+                adj_probs[k][j] *= (1.0 - meter_dict['p'])
 
             if match_meter is not None:
                 test_meter = get_meter(get_pron(match_meter[k]))
-                meter_tensor = meter_dict[test_meter].to(device)
+                meter_tensor = meter_dict[test_meter]
                 if allow_punctuation is True:
-                    adj_probs[k][j] *= (meter_tensor + meter_dict['p'].to(device))
+                    adj_probs[k][j] *= (meter_tensor + meter_dict['p'])
                 else:
                     adj_probs[k][j] *= meter_tensor
 
@@ -682,7 +714,7 @@ def process_text(model, text, start, end, match_rhyme, strip_punctuation=False):
 
 # Alters a text iteratively, word by word, using the model to pick
 # replacements.
-def depoeticize(text, max_iterations=100,
+def depoeticize(text, max_iterations=100, batch_size=200,
                 match_meter=False, match_rhyme=False, title=None, author=None,
                 randomize=False, cooldown=0.01, modifier=None,
                 forbid_reversions=True, preserve_punctuation=False,
@@ -783,6 +815,8 @@ Highlight: <select name="highlighting" id="highlighting">
     new_token_indices = []
     for k in range(max_iterations):
         last_score = 0.0
+        if verbose:
+            iter_start_time = time.time()
         
         if sequential and k >= len(tokenized_text) - start - end:
             break
@@ -800,11 +834,17 @@ Highlight: <select name="highlighting" id="highlighting">
             discouraged_words = None
         
         # Compute the scores used to choose which word to change
-        outputs = [(None, None, float("inf"), None, None, None)] * n
+        outputs = []
         if sequential:
             test_range = [start + k]
         else:
             test_range = range(start, n-end)
+
+        # First, figure out the indices to test for replacements. This is non-trivial because
+        # we want to replace multipart words as whole units and rhyme groups together.
+        masked_indices = []
+        if strong_topic_bias:
+            topicless_masked_indices = []
         for i in test_range:
             if preserve_punctuation:
                 if is_punctuation(tokenized_text[i]):
@@ -825,46 +865,44 @@ Highlight: <select name="highlighting" id="highlighting">
                 
             indices = [multipart_words.get(idx, [idx, idx])
                        for idx in indices]
+            masked_indices.append(indices)
+            if strong_topic_bias:
+                topicless_indices = [(i1-start+len(topicless_toks1), i2-start+len(topicless_toks1))
+                                      for (i1, i2) in indices]
+                topicless_masked_indices.append(topicless_indices)
+
+        # Next, run all the predictions in batches. 
+        if strong_topic_bias:
+            topicless_tokenized_text = topicless_toks1 + tokenized_text[start:-end] + [eos_token]
+            (all_probs1, all_topicless_probs1), (all_probs2, all_topicless_probs2) \
+                = compute_probs_for_masked_tokens(model,
+                                                (tokenized_text, topicless_tokenized_text),
+                                                (masked_indices, topicless_masked_indices),
+                                                batch_size,
+                                                replacements_only=sequential)
+        else:
+            (all_probs1,), (all_probs2,) \
+                = compute_probs_for_masked_tokens(model,
+                                                (tokenized_text,),
+                                                (masked_indices,),
+                                                batch_size,
+                                                replacements_only=sequential)
+
+        # Finally, adjust the probabilities and compute the final scores.
+        for i, indices in enumerate(masked_indices):
+            probs1 = all_probs1 and all_probs1[i]
+            probs2 = all_probs2 and all_probs2[i]
+            topicless_probs1 = all_topicless_probs1 and all_topicless_probs1[i]
+            topicless_probs2 = all_topicless_probs2 and all_topicless_probs2[i]
+
             if match_meter:
                 meter = [join_word_pieces(tokenized_text[i1:i2+1])
                          for (i1, i2) in indices]
             else:
                 meter = None
-                
-            if sequential:
-                probs1 = None
-                probs2 = compute_replacement_probs_for_masked_tokens(model,
-                                                                     tokenized_text,
-                                                                     indices)
-            else:
-                probs1, probs2 \
-                    = compute_probs_for_masked_tokens(model,
-                                                      tokenized_text,
-                                                      indices)
 
-            # The strong topic bias feature compares the probs with and
-            # without the topic and biases the results in favor of words
-            # that are more probable with it.
-            if strong_topic_bias:
-                topicless_indices = [(i1-start+len(topicless_toks1), i2-start+len(topicless_toks1))
-                                     for (i1, i2) in indices]
-                if sequential:
-                    topicless_probs1 = None
-                    topicless_probs2 \
-                        = compute_replacement_probs_for_masked_tokens(model,
-                                                          topicless_toks1 + tokenized_text[start:-end] + [eos_token],
-                                                          topicless_indices)
-                else:
-                    topicless_probs1, topicless_probs2 \
-                        = compute_probs_for_masked_tokens(model,
-                                                          topicless_toks1 + tokenized_text[start:-end] + [eos_token],
-                                                          topicless_indices)
-            else:
-                topicless_probs1 = None
-                topicless_probs2 = None
-
-            raw_probs = m(probs2[0][0])
-            raw_topicless_probs = topicless_probs2 and m(topicless_probs2[0][0])
+            raw_probs = m(probs2[0][0]).to('cpu')
+            raw_topicless_probs = topicless_probs2 and m(topicless_probs2[0][0]).to('cpu')
             if not sequential:
                 probs1 = adjust_probs(model, probs1, tokenized_text, start,
                                       end, indices, modifier,
@@ -882,13 +920,18 @@ Highlight: <select name="highlighting" id="highlighting">
                          strong_topic_bias=strong_topic_bias,
                          topicless_probs=strong_topic_bias and topicless_probs2)
             
-            adjusted_probs = probs2[0][0]
+            adjusted_probs = probs2[0][0].to('cpu')
             predicted_tokens, score \
                 = compute_score_for_tokens(probs1, probs2,
                                            tokenized_text, indices,
                                            relative=True)
-            outputs[i] = (indices, predicted_tokens, score, raw_topicless_probs,
-                          raw_probs, adjusted_probs)
+            score = score.to('cpu')
+            outputs.append((indices, predicted_tokens, score, raw_topicless_probs,
+                            raw_probs, adjusted_probs))
+        del all_probs1
+        del all_probs2
+        del all_topicless_probs1
+        del all_topicless_probs2
             
         # Output an HTML visualization.
         if outfile is not None:
@@ -1067,6 +1110,7 @@ Highlight: <select name="highlighting" id="highlighting">
                 break
 
         if verbose:
+            iter_end_time = time.time()
             sample = tokenized_text[start:-end].copy()
             for i in new_token_indices:
                 sample[i-start] = '<' + sample[i-start] + '>'
@@ -1075,7 +1119,8 @@ Highlight: <select name="highlighting" id="highlighting">
             else:
                 text = tokenizer.clean_up_tokenization(tokenizer.convert_tokens_to_string(sample))
             print('-----------------------')
-            print('Iteration {0}, score = {1}'.format(k+1, last_score))
+            print('Iteration {0}, score = {1}, running time = {2}s'.format(k+1, last_score,
+                                                                           iter_end_time - iter_start_time))
             print(text)
 
         if randomize and cooldown:
@@ -1422,7 +1467,7 @@ def bouts_rimés(rhymes, meter='u-u-u-u-u-',
 
         line_toks = []
         while required_nsyls > 0:
-            permitted_words = torch.zeros([vocab_size])
+            permitted_words = torch.zeros([vocab_size]).to(device)
             for i in range(1, len(required_meter)+1):
                 test_meter = required_meter[:i]
                 if test_meter in meter_dict:
