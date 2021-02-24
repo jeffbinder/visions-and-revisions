@@ -74,8 +74,7 @@ def is_word_piece(model, tok):
     if model.startswith('bert') or model.startswith('distilbert'):
         return tok.startswith('##')
     elif model.startswith('roberta') or model.startswith('gpt2'):
-        tok = tokenizer.convert_tokens_to_string([tok])
-        return re_word.match(tok) and not tok.startswith(' ')
+        return re_word.match(tok) and not tok.startswith('Ġ')
 def join_word_pieces(toks):
     word = ''
     for tok in toks:
@@ -92,7 +91,7 @@ def is_full_word(model_type, tok):
         return re_word.match(tok) and tok.startswith(' ')
 
 def is_punctuation(tok):
-    if tok == '[MASK]':
+    if tok == mask_token:
         return False
     tok = tokenizer.convert_tokens_to_string([tok])
     return not re_word.match(tok)
@@ -123,12 +122,16 @@ def scan_tokenization(model, text, toks):
                 word_piece = True
         except IndexError:
             tok = ''
+        if tok_char_idx == 0 and tok.startswith('Ġ') and char != ' ':
+            tok_char_idx += 1
         try:
             tok_char = tok[tok_char_idx]
         except IndexError:
             tok_char = ''
-        if not char.isspace():
-            if tok_char_idx == 0:
+        if tok_char == 'Ġ':
+            tok_char = ' '
+        if not char.isspace() or char == tok_char:
+            if tok_char_idx == 0 or (tok.startswith('Ġ') and tok_char_idx == 1):
                 if char.isupper():
                     current_capitalization = 'upper_ambiguous'
                 else:
@@ -148,7 +151,7 @@ def scan_tokenization(model, text, toks):
                     capitalization.append(current_capitalization)
                     current_spacing = ''
                     current_capitalization = None
-        elif tok_char_idx == 0:
+        elif tok_char_idx == 0 or (tok.startswith('Ġ') and tok_char_idx == 1):
             current_spacing += char
             char_idx += 1
         after_apostrophe = tok == "'"
@@ -170,6 +173,15 @@ def detokenize(model, toks, spacing, capitalization, html=False):
                 tok = tok.upper()
         else:
             current_spacing = spacing[j]
+            if i == 0 or '\n' in current_spacing:
+                # Remove the extra space created by the tokenizer if we are at the start of a line.
+                if '<Ġ' in tok:
+                    tok = tok.replace('<Ġ', '<')
+                if '>Ġ' in tok:
+                    tok = tok.replace('>Ġ', '>')
+                if tok.startswith('Ġ'):
+                    tok = tok[1:]
+            tok = tok.replace('Ġ', ' ')
             if html:
                 current_spacing = current_spacing.replace(' ', '&nbsp;')
             text += current_spacing
@@ -178,9 +190,16 @@ def detokenize(model, toks, spacing, capitalization, html=False):
                 if tok.startswith('<span'):
                     # Special case for HTML visualization
                     i1 = tok.index('>')+1
+                    if tok[i1] == ' ' and i1 < len(tok)-1:
+                        i1 += 1
                     tok = tok[:i1] + tok[i1].upper() + tok[i1+1:]
                 elif tok[0] == '<' and tok[-1] == '>':
                     # Special case for tokens marked as just modified
+                    if tok[1] == ' ' and len(tok) > 3:
+                        tok = tok[0:2] + tok[2].upper() + tok[3:]
+                    else:
+                        tok = tok[0] + tok[1].upper() + tok[2:]
+                elif tok[0] == ' ':
                     tok = tok[0] + tok[1].upper() + tok[2:]
                 else:
                     tok = tok[0].upper() + tok[1:]
@@ -285,7 +304,7 @@ def initialize_rhyme_and_meter(model, meter=False, rhymes=False):
         rhymable_words, rhyme_matrix = pickle.load(f)
 
 def initialize_model(model_type, model_path):        
-    global tokenizer, model, loaded_model_type, loaded_model_path, bos_token, eos_token
+    global tokenizer, model, loaded_model_type, loaded_model_path, bos_token, eos_token, mask_token
     if loaded_model_type != model_type or loaded_model_path != model_path:
         loaded_model_type = model_type
         loaded_model_path = model_path
@@ -294,16 +313,19 @@ def initialize_model(model_type, model_path):
             model = DistilBertForMaskedLM.from_pretrained(model_path or model_type)
             bos_token = '[CLS]'
             eos_token = '[SEP]'
+            mask_token = '[MASK]'
         if model_type.startswith('bert'):
             tokenizer = BertTokenizer.from_pretrained(model_path or model_type)
             model = BertForMaskedLM.from_pretrained(model_path or model_type)
             bos_token = '[CLS]'
             eos_token = '[SEP]'
+            mask_token = '[MASK]'
         if model_type.startswith('roberta'):
             tokenizer = RobertaTokenizer.from_pretrained(model_path or model_type)
             model = model = RobertaForMaskedLM.from_pretrained(model_path or model_type)
             bos_token = tokenizer.bos_token
             eos_token = tokenizer.eos_token
+            mask_token = tokenizer.mask_token
         model = torch.nn.DataParallel(model)
         model.to(device)
         model.eval()
@@ -325,7 +347,7 @@ def compute_probs_for_masked_tokens(model, tokenized_texts, masked_index_lists, 
                     multipart_words = True
                     if replacements_only:
                         break
-                tokens[i1:i2+1] = ['[MASK]'] * (i2 - i1 + 1)
+                tokens[i1:i2+1] = [mask_token] * (i2 - i1 + 1)
             if not replacements_only or not multipart_words:
                 tensor_indices[(j1, j2)] = len(indexed_tokens)
                 indexed_tokens.append(tokenizer.convert_tokens_to_ids(tokens))
@@ -338,7 +360,7 @@ def compute_probs_for_masked_tokens(model, tokenized_texts, masked_index_lists, 
                     i1 -= shift
                     i2 -= shift
                     shift += (i2 - i1)
-                    wwm_tokens[i1:i2+1] = ['[MASK]']
+                    wwm_tokens[i1:i2+1] = [mask_token]
                 wwm_tensor_indices[(j1, j2)] = len(indexed_tokens)
                 indexed_tokens.append(tokenizer.convert_tokens_to_ids(wwm_tokens))
     
@@ -531,7 +553,7 @@ def compute_score_for_tokens(probs1, probs2, tokenized_text,
     n = len(indices)
     dim = [vocab_size] * n
     
-    mask_token_id = tokenizer.convert_tokens_to_ids(['[MASK]'])[0]
+    mask_token_id = tokenizer.convert_tokens_to_ids([mask_token])[0]
     
     existing_token_ids = [None] * n
     for k, (i1, i2) in enumerate(indices):
@@ -733,13 +755,13 @@ def depoeticize(text, max_iterations=100, batch_size=200,
     initialize_rhyme_and_meter(model_type, meter=match_meter or allow_punctuation is not None,
                                rhymes=match_rhyme)
 
-    topicless_toks1 = tokenizer.tokenize(f'{bos_token}Title: [MASK] / Author: [MASK] [MASK] / Text: \n\n')
+    topicless_toks1 = tokenizer.tokenize(f'{bos_token}Title: {mask_token} / Author: {mask_token} {mask_token} / Text: \n\n')
     if title and author:
         toks1 = tokenizer.tokenize(f'{bos_token}Title: {title} / Author: {author} / Text: \n\n')
     elif title:
-        toks1 = tokenizer.tokenize(f'{bos_token}Title: {title} / Author: [MASK] [MASK] / Text: \n\n')
+        toks1 = tokenizer.tokenize(f'{bos_token}Title: {title} / Author: {mask_token} {mask_token} / Text: \n\n')
     elif author:
-        toks1 = tokenizer.tokenize(f'{bos_token}Title: [MASK] / Author: {author} / Text: \n\n')
+        toks1 = tokenizer.tokenize(f'{bos_token}Title: {mask_token} / Author: {author} / Text: \n\n')
     else:
         toks1 = [bos_token]
     toks3 = [eos_token]
@@ -1479,7 +1501,7 @@ def bouts_rimés(rhymes, meter='u-u-u-u-u-',
                 tok_id = torch.multinomial(probs, 1)
             else:
                 probs = compute_replacement_probs_for_masked_tokens \
-                        (model, toks + ['[MASK]'], [[len(toks), len(toks)]])
+                        (model, toks + [{mask_token}], [[len(toks), len(toks)]])
                 probs = probs[0][0]
                 noise = torch.randn_like(probs)
                 noise = noise * 0.75 + 1.0
