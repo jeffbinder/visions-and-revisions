@@ -1,6 +1,7 @@
 import os
 
-of = open('pofo.corpus', 'w')
+of = open('pofo-corpus.txt', 'w')
+of.write('[CLS]')
 for filename in os.listdir('pofo-corpus'):
     f = open(os.path.join('pofo-corpus', filename), 'r')
     poet = None
@@ -13,7 +14,7 @@ for filename in os.listdir('pofo-corpus'):
             title = line.strip()
         elif i > 4 and line != '~~~~!~~~\n':
             lines.append(line)
-    of.write('The following poem is titled {0}:\n****\n'.format(title))
+    of.write(f'Title: {title} / Author: {poet} / Text: \n')
     of.write(''.join(lines).strip())
-    of.write('\n****\nThe preceding poem is by {0}.\n[SEP]\n'.format(poet))
+    of.write('\n[SEP]\n')
             
