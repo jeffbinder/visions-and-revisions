@@ -283,7 +283,7 @@ To alter the topic of a text, the program adds additional text intended to influ
 > \{****
 > The preceding poem is by Charles Baudelaire.\}
 
-I also added similar text to the collection of poems on which I finetuned the model, so that the neural network would learn to recognize this type of annotation. The brackets indicate that the program is not allowed to alter that text. If the "strong topic bias" feature is turned on, the program computes the probabilities both with and without these annotations and biases the probabilities by the formula ```(probability with annotations / probability without annotations) ** n```, where n is a factor indicating the strength of the topic bias (2.0 is recommended). In this case, the topic annotations cause the program to produce a different prediction:
+I also added similar text to the collection of poems on which I finetuned the model, so that the neural network would learn to recognize this type of annotation. The brackets indicate that the program is not allowed to alter that text. If the "strong topic bias" feature is turned on, the program computes the probabilities both with and without these annotations and computes the scores using the formula ```probability with annotations / probability without annotations ** n```, where n is a factor indicating the strength of the topic bias (0.5 is recommended). In this case, the topic annotations cause the program to produce a different prediction:
 
 > Tyger Tyger, burning leaves, in the middle of the night
 
