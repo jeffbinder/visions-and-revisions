@@ -582,9 +582,9 @@ def compute_score_for_tokens(probs1, probs2, tokenized_text,
         # We compute scores for possible rhyme pairs using sparse matrix
         # arithmetic. We use scipy instead of torch because torch's sparse
         # tensors do not support the .max() function.
-        left_mat = sparse.dia_matrix((probs2[0][0].to('cpu'), [0]), shape=dim)
+        left_mat = sparse.dia_matrix((probs2[0][0].to('cpu'), [0]), shape=dim, dtype=numpy.float32)
         mat = left_mat.dot(rhyme_matrix)
-        right_mat = sparse.dia_matrix((probs2[1][0].to('cpu'), [0]), shape=dim)
+        right_mat = sparse.dia_matrix((probs2[1][0].to('cpu'), [0]), shape=dim, dtype=numpy.float32)
         mat = mat.dot(right_mat)
         prediction_prob = mat.max()
         idx = mat.argmax()
