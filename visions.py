@@ -465,6 +465,8 @@ def compute_probs_for_masked_tokens(model, tokenized_texts, masked_index_lists, 
         predictions = outputs[0]
         all_predictions.append(predictions)
     del tokens_tensor
+    if len(all_predictions) == 0:
+        return [None]*len(tokenized_texts), [None]*len(tokenized_texts)
     predictions = torch.cat(all_predictions, dim=0)
 
     all_probs = []
@@ -500,7 +502,7 @@ def compute_probs_for_masked_tokens(model, tokenized_texts, masked_index_lists, 
     del predictions
 
     if replacements_only:
-        return None, all_replacement_probs
+        return [None]*len(tokenized_texts), all_replacement_probs
     else:
         return all_probs, all_replacement_probs
 
@@ -690,7 +692,7 @@ def compute_score_for_tokens(probs1, probs2, tokenized_text,
         predicted_tokens[i] \
             = tokenizer.convert_ids_to_tokens([predicted_token_ids[i]])[0]
 
-    return predicted_tokens, score
+    return predicted_tokens, float(score)
 
 # Tokenize a text and figure out (as best we can) its rhyme scheme.
 def process_text(model, text, start, end, match_rhyme, strip_punctuation=False):
@@ -1037,7 +1039,6 @@ Highlight: <select name="highlighting" id="highlighting">
                 = compute_score_for_tokens(probs1, probs2,
                                            tokenized_text, indices,
                                            relative=True)
-            score = score.to('cpu')
             outputs.append((indices, predicted_tokens, score, raw_topicless_probs,
                             raw_probs, adjusted_probs))
         del all_probs1
