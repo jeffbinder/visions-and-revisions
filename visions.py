@@ -630,7 +630,7 @@ def adjust_probs(model, probs, tokenized_text, start, end, masked_indices,
 # probability for certain words. If multiple words are chosen, it is
 # assumed that they are supposed to rhyme.
 def compute_score_for_tokens(probs1, probs2, tokenized_text,
-                             indices, relative):
+                             indices, require_replacement, relative):
     n = len(indices)
     dim = [vocab_size] * n
     
@@ -648,11 +648,18 @@ def compute_score_for_tokens(probs1, probs2, tokenized_text,
     if probs1:
         for k in range(n):
             existing_word_prob = 0.0
-            for i, tok_id in enumerate(existing_token_ids[k]):
-                prob_tensor = probs1[k][i]
-                existing_word_prob += prob_tensor[tok_id].log()
-            existing_word_prob /= len(existing_token_ids[k])
-            existing_words_prob *= existing_word_prob.exp()
+            if len(existing_token_ids[k]) > 1:
+                for i, tok_id in enumerate(existing_token_ids[k]):
+                    prob_tensor = probs1[k][i]
+                    existing_word_prob += prob_tensor[tok_id].log()
+                existing_word_prob /= len(existing_token_ids[k])
+                existing_words_prob *= existing_word_prob.exp()
+            else:
+                existing_words_prob = probs1[k][0][existing_token_ids[k]]
+
+    if require_replacement:
+        for k in range(n):
+            probs2[k][0][existing_token_ids[k][0]] = 0.0
         
     if n == 1:
         prob_tensor = probs2[0][0]
@@ -833,7 +840,7 @@ def depoeticize(text, max_iterations=100, batch_size=200,
                 model_type='bert-base-uncased', model_path=None,
                 preserve_spacing_and_capitalization=True,
                 allow_punctuation=None, sequential=False, verbose=True,
-                outfile=None, top_n=10):
+                outfile=None, top_n=10, require_new_rhymes=False):
     stopwords = set(stopwords)
 
     if modifier is not None:
@@ -923,6 +930,10 @@ Highlight: <select name="highlighting" id="highlighting">
     if sequential:
         max_iterations = len(toks2)
     new_token_indices = []
+    if require_new_rhymes:
+        original_rhymes = {}
+        for i in rhyme_groups:
+            original_rhymes[i] = tokenized_text[i]
     for k in range(max_iterations):
         last_score = 0.0
         if verbose:
@@ -930,6 +941,11 @@ Highlight: <select name="highlighting" id="highlighting">
         
         if sequential and k >= len(tokenized_text) - start - end:
             break
+
+        if require_new_rhymes:
+            fallback_indices = None
+            fallback_predicted_tokens = None
+            fallback_score = None
             
         # Discourage the selection of words already in the text, save for stopwords.
         if discourage_repetition is not False:
@@ -1015,6 +1031,15 @@ Highlight: <select name="highlighting" id="highlighting">
             else:
                 meter = None
 
+            if require_new_rhymes and len(indices) > 1:
+                require_replacement = True
+                for i1, i2 in indices:
+                    if i1 in original_rhymes and original_rhymes[i1] != tokenized_text[i1]:
+                        require_replacement = False
+                        break
+            else:
+                require_replacement = False
+
             raw_probs = m(probs2[0][0]).to('cpu')
             raw_topicless_probs = topicless_probs2 and m(topicless_probs2[0][0]).to('cpu')
             if not sequential:
@@ -1038,9 +1063,16 @@ Highlight: <select name="highlighting" id="highlighting">
             predicted_tokens, score \
                 = compute_score_for_tokens(probs1, probs2,
                                            tokenized_text, indices,
-                                           relative=True)
+                                    relative=True,
+                                    require_replacement=require_replacement)
+
+            if require_replacement:
+                fallback_indices = indices
+                fallback_predicted_tokens = predicted_tokens
+                fallback_score = score
             outputs.append((indices, predicted_tokens, score, raw_topicless_probs,
                             raw_probs, adjusted_probs))
+
         del all_probs1
         del all_probs2
         del all_topicless_probs1
@@ -1151,6 +1183,10 @@ Highlight: <select name="highlighting" id="highlighting">
         if chosen_indices is None:
             if sequential:
                 continue
+            elif require_new_rhymes and fallback_indices is not None:
+                chosen_indices = fallback_indices
+                chosen_tokens = fallback_predicted_tokens
+                last_score = fallback_score
             else:
                 break
 
@@ -1208,15 +1244,26 @@ Highlight: <select name="highlighting" id="highlighting">
                     
             replacements = {}
             for i_old in list(rhyme_groups.keys()):
-               group = rhyme_groups[i_old].copy()
-               if i_old > i1:
-                   i_new = i_old - (i2 - i1)
-               else:
-                   i_new = i_old
-               group = [(idx - (i2 - i1) if idx > i1 else idx)
-                        for idx in group]
-               replacements[i_new] = group
+                group = rhyme_groups[i_old].copy()
+                if i_old > i1:
+                    i_new = i_old - (i2 - i1)
+                else:
+                    i_new = i_old
+                group = [(idx - (i2 - i1) if idx > i1 else idx)
+                         for idx in group]
+                replacements[i_new] = group
             rhyme_groups = replacements
+                    
+            if require_new_rhymes:
+                replacements = {}
+                for i_old in list(original_rhymes.keys()):
+                    rhyme_tok = original_rhymes[i_old]
+                    if i_old > i1:
+                        i_new = i_old - (i2 - i1)
+                    else:
+                        i_new = i_old
+                    replacements[i_new] = rhyme_tok
+                original_rhymes = replacements
 
         if not change_made:
             if sequential:
