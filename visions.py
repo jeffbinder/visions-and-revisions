@@ -166,7 +166,7 @@ def scan_tokenization(model, text, toks):
                 word_piece = True
         except IndexError:
             tok = ''
-        if tok_char_idx == 0 and (tok.startswith('Ġ') or tok.startswith(' ') or tok.startswith('▁')) and char != ' ':
+        if tok_char_idx == 0 and (tok.startswith('Ġ') or tok.startswith(' ') or tok.startswith('▁')) and len(tok) > 1 and char != ' ':
             tok_char_idx += 1
         try:
             tok_char = tok[tok_char_idx]
@@ -450,8 +450,8 @@ def compute_probs_for_masked_tokens(model, tokenized_texts, masked_index_lists, 
         if n < max_len:
             indexed_tokens[i] = indexed_tokens[i] + [pad_token_id]*(max_len-n)
         attention_mask.append([1]*n + [0]*(max_len-n))
-    tokens_tensor = torch.tensor(indexed_tokens)
-    attention_mask = torch.tensor(attention_mask)
+    tokens_tensor = torch.tensor(indexed_tokens, device='cpu')
+    attention_mask = torch.tensor(attention_mask, device='cpu')
 
     all_predictions = []
     ntexts = tokens_tensor.shape[0]
@@ -459,15 +459,20 @@ def compute_probs_for_masked_tokens(model, tokenized_texts, masked_index_lists, 
     for batchnum in range(nbatches):
         batch_start = batchnum * batch_size
         batch_end = min(batch_start + batch_size, ntexts)
+        toks_slice = tokens_tensor[batch_start:batch_end].to(device)
+        mask_slice = attention_mask[batch_start:batch_end].to(device)
         with torch.no_grad():
-            outputs = model(tokens_tensor[batch_start:batch_end],
-                            attention_mask=attention_mask[batch_start:batch_end])
+            outputs = model(toks_slice,
+                            attention_mask=mask_slice)
+        del toks_slice
+        del mask_slice
         predictions = outputs[0]
         all_predictions.append(predictions)
+        del outputs
     del tokens_tensor
+    del attention_mask
     if len(all_predictions) == 0:
         return [None]*len(tokenized_texts), [None]*len(tokenized_texts)
-    predictions = torch.cat(all_predictions, dim=0)
 
     all_probs = []
     all_replacement_probs = []
@@ -483,7 +488,9 @@ def compute_probs_for_masked_tokens(model, tokenized_texts, masked_index_lists, 
                 for k, (i1, i2) in enumerate(masked_index_set):
                     word_probs = []
                     for i in range(i1, i2+1):
-                        word_probs.append(predictions[j, i, :])
+                        jbatch = j // batch_size
+                        jpreds = j % batch_size
+                        word_probs.append(all_predictions[jbatch][jpreds, i, :])
                     index_set_probs[k] = word_probs
                 if not replacements_only:
                     probs.append(index_set_probs)
@@ -495,11 +502,14 @@ def compute_probs_for_masked_tokens(model, tokenized_texts, masked_index_lists, 
                     i1 -= shift
                     i2 -= shift
                     shift += (i2 - i1)
-                    index_set_probs[k] = [predictions[j, i1, :]]
+                    jbatch = j // batch_size
+                    jpreds = j % batch_size
+                    index_set_probs[k] = [all_predictions[jbatch][jpreds, i1, :]]
             replacement_probs.append(index_set_probs)
         all_probs.append(probs)
         all_replacement_probs.append(replacement_probs)
-    del predictions
+    for predictions in all_predictions:
+        del predictions
 
     if replacements_only:
         return [None]*len(tokenized_texts), all_replacement_probs
