@@ -625,7 +625,7 @@ def adjust_probs(model, probs, tokenized_text, start, end, masked_indices,
                     adj_probs[k][j] *= rhyme_tensor.to(device)
 
             if strong_topic_bias:
-                adj_probs[k][j] /= m(topicless_probs[k][j]) ** strong_topic_bias
+                adj_probs[k][j] /= m(topicless_probs[k][j].to(device)) ** strong_topic_bias
                 # Sometimes funky scores can arise from this division; we just avoid
                 # choosing those words.
                 nan_mask = adj_probs[k][j].isnan()
