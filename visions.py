@@ -466,8 +466,7 @@ def compute_probs_for_masked_tokens(model, tokenized_texts, masked_index_lists, 
                             attention_mask=mask_slice)
         del toks_slice
         del mask_slice
-        predictions = outputs[0]
-        all_predictions.append(predictions)
+        all_predictions.append(outputs[0].to('cpu'))
         del outputs
     del tokens_tensor
     del attention_mask
@@ -569,7 +568,7 @@ def adjust_probs(model, probs, tokenized_text, start, end, masked_indices,
     else:
         forbidden_words = None
 
-    adj_probs = [[u.clone() for u in t] for t in probs]
+    adj_probs = [[u.clone().to(device) for u in t] for t in probs]
     for k in range(len(adj_probs)):
         for j in range(len(adj_probs[k])):
             if random_factor:
