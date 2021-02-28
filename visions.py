@@ -849,7 +849,8 @@ def depoeticize(text, max_iterations=100, batch_size=10,
                 model_type='bert-base-uncased', model_path=None,
                 preserve_spacing_and_capitalization=True,
                 allow_punctuation=None, sequential=False, verbose=True,
-                outfile=None, top_n=10, require_new_rhymes=False):
+                outfile=None, top_n=10, require_new_rhymes=False,
+                num_changes_per_iter=1):
     stopwords = set(stopwords)
 
     if modifier is not None:
@@ -1060,7 +1061,7 @@ Highlight: <select name="highlighting" id="highlighting">
                              topicless_probs=strong_topic_bias and topicless_probs1)
             probs2 = adjust_probs(model, probs2, tokenized_text, start,
                                   end, indices, modifier,
-                                  meter, forbidden_texts,
+                                  meter, forbidden_texts if num_changes_per_iter == 1 else {},
                                   discouraged_words=discouraged_words,
                                   random_factor=randomize,
                                   allow_punctuation=allow_punctuation,
@@ -1176,25 +1177,28 @@ Highlight: <select name="highlighting" id="highlighting">
             outfile.write(html)
             outfile.flush()
 
-        # Choose a word to change
+        # Choose words to change
         outputs.sort(key=lambda t: t[2])
-        chosen_indices = None
+        chosen_index_lists = []
+        chosen_token_lists = []
+        i = 0
         for indices, predicted_tokens, score, _, _, _ in outputs:
-            if score >= stop_score:
+            if score >= stop_score or i >= num_changes_per_iter:
                 break
             if predicted_tokens is None:
                 continue
-            chosen_indices = indices
-            chosen_tokens = predicted_tokens
-            last_score = score
-            break
+            i += 1
+            chosen_index_lists.append(indices)
+            chosen_token_lists.append(predicted_tokens)
+            if i == 1:
+                lowest_score = score
 
-        if chosen_indices is None:
+        if not chosen_index_lists:
             if sequential:
                 continue
             elif require_new_rhymes and fallback_indices is not None:
-                chosen_indices = fallback_indices
-                chosen_tokens = fallback_predicted_tokens
+                chosen_index_lists = [fallback_indices]
+                chosen_token_lists = [fallback_predicted_tokens]
                 last_score = fallback_score
             else:
                 break
@@ -1212,69 +1216,96 @@ Highlight: <select name="highlighting" id="highlighting">
         # Make the actual revision and make note of what we've done.
         change_made = False
         new_token_indices = []
-        shift = 0
-        for j, (i1, i2) in enumerate(chosen_indices):
-            i1 -= shift
-            i2 -= shift
-            shift += (i2 - i1)
-            n -= (i2 - i1)
-            token = chosen_tokens[j]
-            if i2 > i1:
-                change_made = True
-                tokenized_text[i1:i2+1] = [token]
-                new_token_indices.append(i1)
-            elif tokenized_text[i1] != token:
-                change_made = True
-                tokenized_text[i1] = token
-                new_token_indices.append(i1)
+        new_tokenized_text = tokenized_text.copy()
+        for change_num in range(len(chosen_index_lists)):
+            chosen_indices = chosen_index_lists[change_num]
+            chosen_tokens = chosen_token_lists[change_num]
+            shift = 0
+            for j, (i1, i2) in enumerate(chosen_indices):
+                i1 -= shift
+                i2 -= shift
+                shift += (i2 - i1)
+                n -= (i2 - i1)
+                token = chosen_tokens[j]
+                if i2 > i1:
+                    change_made = True
+                    new_tokenized_text[i1:i2+1] = [token]
+                    new_token_indices.append(i1)
+                elif tokenized_text[i1] != token:
+                    change_made = True
+                    new_tokenized_text[i1] = token
+                    new_token_indices.append(i1)
 
-            fixed_toks_new = set()
-            for fixed_tok in fixed_toks:
-                if fixed_tok > i1 and fixed_tok <= i2:
-                    pass
-                elif fixed_tok > i2:
-                    fixed_toks_new.add(fixed_tok - (i2 - i1))
-                else:
-                    fixed_toks_new.add(fixed_tok)
-            fixed_toks = fixed_toks_new
-            
-            for i in range(i1, i2+1):
-                if i in multipart_words:
-                    del multipart_words[i]
-            replacements = {}
-            for i in list(multipart_words.keys()):
-                if i > i2:
-                    j1, j2 = multipart_words[i]
-                    del multipart_words[i]
-                    replacements[i - (i2 - i1)] = (j1 - (i2 - i1),
-                                                   j2 - (i2 - i1))
-            for i in replacements:
-                multipart_words[i] = replacements[i]
-                    
-            replacements = {}
-            for i_old in list(rhyme_groups.keys()):
-                group = rhyme_groups[i_old].copy()
-                if i_old > i1:
-                    i_new = i_old - (i2 - i1)
-                else:
-                    i_new = i_old
-                group = [(idx - (i2 - i1) if idx > i1 else idx)
-                         for idx in group]
-                replacements[i_new] = group
-            rhyme_groups = replacements
-                    
-            if require_new_rhymes:
+                fixed_toks_new = set()
+                for fixed_tok in fixed_toks:
+                    if fixed_tok > i1 and fixed_tok <= i2:
+                        pass
+                    elif fixed_tok > i2:
+                        fixed_toks_new.add(fixed_tok - (i2 - i1))
+                    else:
+                        fixed_toks_new.add(fixed_tok)
+                fixed_toks = fixed_toks_new
+
+                for change_num2 in range(change_num+1, len(chosen_index_lists)):
+                    replacement = []
+                    for i, (j1, j2) in enumerate(chosen_index_lists[change_num2]):
+                        if j1 > i2:
+                            replacement.append((j1 - (i2 - i1),
+                                               j2 - (i2 - i1)))
+                    chosen_index_lists[change_num2] = replacement
+                
+                for i in range(i1, i2+1):
+                    if i in multipart_words:
+                        del multipart_words[i]
                 replacements = {}
-                for i_old in list(original_rhymes.keys()):
-                    rhyme_tok = original_rhymes[i_old]
+                for i in list(multipart_words.keys()):
+                    if i > i2:
+                        j1, j2 = multipart_words[i]
+                        del multipart_words[i]
+                        replacements[i - (i2 - i1)] = (j1 - (i2 - i1),
+                                                       j2 - (i2 - i1))
+                for i in replacements:
+                    multipart_words[i] = replacements[i]
+                        
+                replacements = {}
+                for i_old in list(rhyme_groups.keys()):
+                    group = rhyme_groups[i_old].copy()
                     if i_old > i1:
                         i_new = i_old - (i2 - i1)
                     else:
                         i_new = i_old
-                    replacements[i_new] = rhyme_tok
-                original_rhymes = replacements
+                    group = [(idx - (i2 - i1) if idx > i1 else idx)
+                             for idx in group]
+                    replacements[i_new] = group
+                rhyme_groups = replacements
+                        
+                if require_new_rhymes:
+                    replacements = {}
+                    for i_old in list(original_rhymes.keys()):
+                        rhyme_tok = original_rhymes[i_old]
+                        if i_old > i1:
+                            i_new = i_old - (i2 - i1)
+                        else:
+                            i_new = i_old
+                        replacements[i_new] = rhyme_tok
+                    original_rhymes = replacements
 
-        if not change_made:
+        if forbid_reversions and num_changes_per_iter > 1:
+            # There's no clear way to implement this when choosing tokens if we
+            # are going to change multiple tokens at once, so we just stop
+            # when we reach a reversion.
+            d = forbidden_texts
+            for tok in new_tokenized_text:
+                if tok in d:
+                    d = d[tok]
+                else:
+                    break
+            else:
+                change_made = False
+
+        if change_made:
+            tokenized_text = new_tokenized_text
+        else:
             if sequential:
                 continue
             else:
@@ -1290,7 +1321,7 @@ Highlight: <select name="highlighting" id="highlighting">
             else:
                 text = tokenizer.clean_up_tokenization(tokenizer.convert_tokens_to_string(sample))
             print('-----------------------')
-            print('Iteration {0}, score = {1}, running time = {2}s'.format(k+1, last_score,
+            print('Iteration {0}, lowest score = {1}, running time = {2}s'.format(k+1, lowest_score,
                                                                            iter_end_time - iter_start_time))
             print(text)
 
