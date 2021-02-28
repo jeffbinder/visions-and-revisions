@@ -840,7 +840,7 @@ def process_text(model, text, start, end, match_rhyme, strip_punctuation=False):
 
 # Alters a text iteratively, word by word, using the model to pick
 # replacements.
-def depoeticize(text, max_iterations=100, batch_size=200,
+def depoeticize(text, max_iterations=100, batch_size=10,
                 match_meter=False, match_rhyme=False, title=None, author=None,
                 randomize=False, cooldown=0.01, modifier=None,
                 forbid_reversions=True, preserve_punctuation=False,
