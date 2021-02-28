@@ -1246,12 +1246,14 @@ Highlight: <select name="highlighting" id="highlighting">
                         fixed_toks_new.add(fixed_tok)
                 fixed_toks = fixed_toks_new
 
-                for change_num2 in range(change_num+1, len(chosen_index_lists)):
+                for change_num2 in range(len(chosen_index_lists)):
                     replacement = []
                     for i, (j1, j2) in enumerate(chosen_index_lists[change_num2]):
                         if j1 > i2:
                             replacement.append((j1 - (i2 - i1),
                                                j2 - (i2 - i1)))
+                        else:
+                            replacement.append((j1, j2))
                     chosen_index_lists[change_num2] = replacement
                 
                 for i in range(i1, i2+1):
