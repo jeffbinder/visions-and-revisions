@@ -1090,7 +1090,7 @@ Highlight: <select name="highlighting" id="highlighting">
             
         # Output an HTML visualization.
         if outfile is not None:
-            vals = []
+            vals = {}
             min_entropy = float("inf")
             max_entropy = 0
             min_score = float("inf")
@@ -1114,19 +1114,25 @@ Highlight: <select name="highlighting" id="highlighting">
                     max_entropy = selected_entropy
                 if score == float("inf"):
                     score_val = 0
-                if score == 0:
+                elif score == 0:
                     score_val = -float("inf")
                 else:
                     score_val = -math.log(score)
-                if score_val < min_score:
-                    min_score = score_val
-                if score_val > max_score:
-                    max_score = score_val
-                vals.append((entropy1, entropy2, entropy3, score_val))
+                    if score_val < min_score:
+                        min_score = score_val
+                    if score_val > max_score:
+                        max_score = score_val
+                for i1, i2 in indices:
+                    for i in range(i1, i2+1):
+                        vals[i] = (entropy1, entropy2, entropy3, probs1, probs2, probs3, score_val, predicted_tokens)
 
             html = "<div class='iter'>"
             viz_toks = []
-            for i, (entropy1, entropy2, entropy3, score_val) in list(enumerate(vals))[start:-end]:
+            for i in range(start, len(tokenized_text)-end):
+                if i in vals:
+                    entropy1, entropy2, entropy3, probs1, probs2, probs3, score_val, predicted_tokens = vals[i]
+                else:
+                    entropy1, entropy2, entropy3, probs1, probs2, probs3, score_val, predicted_tokens = 0.0, 0.0, 0.0, None, None, None, 0.0, None
                 if i in multipart_words:
                     i1, i2 = multipart_words[i]
                     if i > i1:
@@ -1135,7 +1141,7 @@ Highlight: <select name="highlighting" id="highlighting">
                     i1 = i
                     i2 = i
                 s = tokenizer.convert_tokens_to_string(tokenized_text[i1:i2+1]).replace(" ' ", "'")
-                if tokenized_text[i1][0] in ('Ġ', ' ', '▁'):
+                if tokenized_text[i1][0] in ('Ġ', '▁', ' '):
                     s = ' ' + s
                 if max_entropy == min_entropy:
                     entropy_relative = 0.0
@@ -1151,23 +1157,26 @@ Highlight: <select name="highlighting" id="highlighting">
                     score_relative = (score_val - min_score) / (max_score - min_score)
                 changed = i in new_token_indices
                 changed = " changed-tok" if changed else ""
-                raw_probs = outputs[i][3]
-                raw_topicless_probs = outputs[i][4]
-                adjusted_probs = outputs[i][5]
+                raw_probs = probs1
+                raw_topicless_probs = probs2
+                adjusted_probs = probs3
                 def get_top(probs):
                     if probs is None:
                         return 'null'
                     out = torch.topk(probs, top_n)
                     top_options = zip(out.indices, out.values)
-                    top_options = [(tokenizer.convert_ids_to_tokens([i])[0],
+                    top_options = [(tokenizer.convert_tokens_to_string(tokenizer.convert_ids_to_tokens([j])).replace(' ', ''),
                                     float(p))
-                                   for i, p in top_options]
+                                   for j, p in top_options]
                     top_options = json.dumps(top_options)
                     return top_options
                 options1 = get_top(raw_probs)
                 options2 = get_top(raw_topicless_probs)
                 options3 = get_top(adjusted_probs)
-                replacement_tokens = json.dumps(outputs[i][1])
+                if predicted_tokens is not None:
+                    replacement_tokens = json.dumps([tokenizer.convert_tokens_to_string([s]) for s in predicted_tokens])
+                else:
+                    replacement_tokens = 'null'
                 viz_toks.append(f"<span class='tok{changed}' data-entropy1='{entropy1}' data-entropy2='{entropy2}' data-entropy3='{entropy3}' data-score='{score_val}' data-entropy-relative='{entropy_relative}' data-score-relative='{score_relative}' data-options1='{options1}' data-options2='{options2}' data-options3='{options3}' data-replacements='{replacement_tokens}'>{s}</span>")
             if preserve_spacing_and_capitalization:
                 html += detokenize(model_type, viz_toks, spacing, capitalization, html=True)
