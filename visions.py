@@ -1135,6 +1135,8 @@ Highlight: <select name="highlighting" id="highlighting">
                     i1 = i
                     i2 = i
                 s = tokenizer.convert_tokens_to_string(tokenized_text[i1:i2+1]).replace(" ' ", "'")
+                if tokenized_text[i1][0] in ('Ġ', ' ', '▁'):
+                    s = ' ' + s
                 if max_entropy == min_entropy:
                     entropy_relative = 0.0
                 else:
