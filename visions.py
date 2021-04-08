@@ -1520,7 +1520,7 @@ def banalify(text, window_size=10, context_size=10, batch_size=10,
     initialize_rhyme_and_meter(model_type, meter=match_meter or allow_punctuation is not None,
                                rhymes=match_rhyme)
     
-    toks = tokenizer.tokenize(text)
+    toks = tokenizer.tokenize(text.replace('{', '').replace('}', ''))
     spacing, capitalization = scan_tokenization(model_type, text, toks)
     
     out_toks = []
@@ -1539,7 +1539,7 @@ def banalify(text, window_size=10, context_size=10, batch_size=10,
         j = 0
         while j < window_size and window_end < len(toks):
             if not is_word_piece(model_type, toks[window_end]):
-                if toks[window_end] == '{' or toks[window_end] == '}':
+                if toks[window_end] in ('{', ' {', '}', ' }'):
                     bracket_indices.add(num_non_word_pieces)
                 else:
                     j += 1
