@@ -1508,7 +1508,7 @@ def metalness_modifier():
 # Depoeticizes a text piece by piece examining only an n-word window at a time, with
 # a certain amount of context to the left and right. This procedure can handle longer
 # texts than depoeticize().
-def banalify(text, window_size=10, context_size=10,
+def banalify(text, window_size=10, context_size=10, batch_size=10,
              max_iterations=100, match_meter=False, match_rhyme=False,
              title=None, author=None, randomize=False, cooldown=0.01, modifier=None,
              forbid_reversions=True, preserve_punctuation=False,
@@ -1618,7 +1618,7 @@ def banalify(text, window_size=10, context_size=10,
             contextualized_text = f'{window_text} {{{right_context_text}}}'
         
         #print(contextualized_text)
-        contextualized_text = depoeticize(contextualized_text, max_iterations,
+        contextualized_text = depoeticize(contextualized_text, max_iterations, batch_size,
                                           match_meter, match_rhyme, title, author,
                                           randomize, cooldown, modifier,
                                           forbid_reversions, preserve_punctuation,
