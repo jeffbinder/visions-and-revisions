@@ -1,7 +1,8 @@
+import codecs
 from visions import *
-f = open('mobydick.txt', 'r')
+f = codecs.open('mobydick.txt', 'r', 'utf-8')
 text = f.read()
-output = banalify(text, window_size=10, context_size=100, max_iterations=500,
+output = banalify(text, window_size=10, context_size=20, max_iterations=500,
              match_meter=False, match_rhyme=False,
              title=None, author=None,
              randomize=False, cooldown=0.01, modifier=None,
@@ -12,4 +13,4 @@ output = banalify(text, window_size=10, context_size=100, max_iterations=500,
              model_type='bert-large-uncased-whole-word-masking', model_path=None,
              sequential=False, verbose=False)
 of = open('mobydick-banalified-10-100.txt', 'w')
-of.write(text)
+of.write(output)

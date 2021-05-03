@@ -4,6 +4,7 @@ import pickle
 import random
 import re
 import time
+import unicodedata
 
 import numpy
 import scipy
@@ -34,9 +35,10 @@ g2p = G2p()
 
 m = torch.nn.Softmax(dim=0)
 
-re_word = re.compile(r"[▁a-zA-Z' ]+")
+re_word = re.compile(r"^[▁a-zA-Z' ]+$")
 re_space = re.compile(r"^[ \n\t]+$")
 re_vowel = re.compile(r"[aeiouy]")
+re_space_and_brackets = re.compile(r"^[\s{}]+$")
 def get_pron(tok):
     if tok.startswith('madeupword'):
         return []
@@ -150,6 +152,8 @@ def scan_tokenization(model, text, toks):
     current_spacing = ''
     current_capitalization = None
     after_apostrophe = False
+    after_double_quote = False
+    start_of_text = True
     while char_idx < len(text):
         char = text[char_idx]
         if char == '{' or char == '}':
@@ -160,22 +164,32 @@ def scan_tokenization(model, text, toks):
             tok = toks[tok_idx]
             if model.startswith('microsoft/deberta') and '-v2' not in model:
                 tok = tokenizer.convert_tokens_to_string([tok])
-            if is_word_piece(model, tok) or tok == "'" or \
+            if (is_word_piece(model, tok) and tok_idx > 0 and not after_double_quote) or tok == "'" or \
                     (after_apostrophe and tok in ("s", "d", "st", "ve", "re", "nt", "ll", "t", "m")):
                 tok = join_word_pieces([tok])
                 word_piece = True
         except IndexError:
             tok = ''
-        if tok_char_idx == 0 and (tok.startswith('Ġ') or tok.startswith(' ') or tok.startswith('▁')) and len(tok) > 1 and char != ' ':
-            tok_char_idx += 1
+        if tok_char_idx == 0 and (tok.startswith('Ġ') or tok.startswith('Ċ') or tok.startswith(' ') or tok.startswith('▁')) and len(tok) > 1:
+            if char != ' ':
+                # Advance the counter when the token contains an extraneous space
+                tok_char_idx += 1
+            elif current_spacing.endswith('\n') or start_of_text:
+                # We have to do this because the tokenizer always adds a space to tokens at
+                # the start of a line, which is stripped out in detokenize(). To account
+                # for this, we have to add an extra space in cases where a space really does
+                # exist at the start of a line.
+                current_spacing += ' '
         try:
             tok_char = tok[tok_char_idx]
         except IndexError:
             tok_char = ''
-        if tok_char in ('Ġ', '▁'):
+        if tok_char in ('Ġ', 'Ċ', '▁'):
             tok_char = ' '
-        if not char.isspace() or char == tok_char:
-            if tok_char_idx == 0 or ((tok.startswith('Ġ') or tok.startswith(' ') or tok.startswith('▁')) and tok_char_idx == 1):
+        # print(f'{char_idx}: \'{char}\' \'{tok}\' \'{tok_char}\'{" word_piece" if word_piece else ""}'); time.sleep(0.001)
+        # RoBERTa uses '▁' for both space and newline.
+        if not char.isspace() or char == tok_char or tok == '▁':
+            if tok_char_idx == 1 if (tok.startswith('Ġ') or tok.startswith('Ċ') or tok.startswith(' ') or tok.startswith('▁')) else tok_char_idx == 0:
                 if char.isupper():
                     current_capitalization = 'upper_ambiguous'
                 else:
@@ -186,28 +200,36 @@ def scan_tokenization(model, text, toks):
                 else:
                     current_capitalization = 'upper_initial'
             char_idx += 1
+            start_of_text = False
             tok_char_idx += 1
             if tok_char_idx == len(tok):
                 tok_idx += 1
                 tok_char_idx = 0
+                after_apostrophe = tok == "'"
+                after_double_quote = tok in ('"', ' "', '▁"', 'Ġ"')
                 if not word_piece:
                     spacing.append(current_spacing)
                     capitalization.append(current_capitalization)
                     current_spacing = ''
                     current_capitalization = None
-        elif tok_char_idx == 0 or ((tok.startswith('Ġ') or tok.startswith(' ') or tok.startswith('▁')) and tok_char_idx == 1):
+        elif tok_char_idx == 0 or ((tok.startswith('Ġ') or tok.startswith('Ċ') or tok.startswith(' ') or tok.startswith('▁')) and tok_char_idx == 1):
             current_spacing += char
             char_idx += 1
-        after_apostrophe = tok == "'"
+            start_of_text = False
+        else:
+            print("WARNING: Text scanner found an unexpected character. This probably indicates a bug in the detokenizer.")
+            char_idx += 1
+            print(f'Character {char_idx}: \'{char}\' / token: \'{tok}\' / token character: \'{tok_char}\'{" word_piece" if word_piece else ""}'); time.sleep(0.1)
     spacing.append(current_spacing)
     return (spacing, capitalization)
     
-def detokenize(model, toks, spacing, capitalization, html=False):
+def detokenize(model, toks, spacing, capitalization, html=False, start_of_line=True):
     text = ''
     i = 0
     j = 0
     current_capitalization = None
     after_apostrophe = False
+    after_double_quote = False
     while i < len(toks):
         tok = toks[i]
         if model.startswith('microsoft/deberta') and '-v2' not in model:
@@ -218,17 +240,23 @@ def detokenize(model, toks, spacing, capitalization, html=False):
                     tok = tok[:i1] + tokenizer.convert_tokens_to_string([tok[i1:i2]]) + tok[i2:]
                 except ValueError:
                     pass
+                except KeyError:
+                    pass
             elif tok.startswith('<'):
                 try:
                     tok = '<' + tokenizer.convert_tokens_to_string([tok[1:-1]]) + '>'
                 except ValueError:
+                    pass
+                except KeyError:
                     pass
             else:
                 try:
                     tok = tokenizer.convert_tokens_to_string([tok])
                 except ValueError:
                     pass
-        if is_word_piece(model, tok) or tok == "'" or \
+                except KeyError:
+                    pass
+        if (is_word_piece(model, tok) and i > 0 and not after_double_quote) or tok == "'" or \
                     (after_apostrophe and tok in ("s", "d", "st", "ve", "re", "nt", "ll", "t", "m")):
             tok = join_word_pieces([tok])
             if current_capitalization == 'upper_all':
@@ -236,8 +264,9 @@ def detokenize(model, toks, spacing, capitalization, html=False):
         else:
             current_spacing = spacing[j]
             tok = tok.replace('Ġ', ' ')
+            tok = tok.replace('Ċ', '\n')
             tok = tok.replace('▁', ' ')
-            if i == 0 or '\n' in current_spacing:
+            if (i == 0 and start_of_line) or '\n' in current_spacing:
                 # Remove the extra space created by the tokenizer if we are at the start of a line.
                 if '< ' in tok:
                     tok = tok.replace('< ', '<')
@@ -258,7 +287,7 @@ def detokenize(model, toks, spacing, capitalization, html=False):
                     tok = tok[:i1] + tok[i1].upper() + tok[i1+1:]
                 elif tok[0] == '<' and tok[-1] == '>':
                     # Special case for tokens marked as just modified
-                    if tok[1] == ' ' and len(tok) > 3:
+                    if tok[1] == ' ' and len(tok) > 2:
                         tok = tok[0:2] + tok[2].upper() + tok[3:]
                     else:
                         tok = tok[0] + tok[1].upper() + tok[2:]
@@ -268,10 +297,13 @@ def detokenize(model, toks, spacing, capitalization, html=False):
                     tok = tok[0].upper() + tok[1:]
             elif current_capitalization == 'upper_all':
                 tok = tok.upper()
+            elif current_capitalization == 'lower':
+                tok = tok.lower()
             j += 1
         text += tok
         i += 1
         after_apostrophe = tok == "'"
+        after_double_quote = tok in ('"', ' "', '▁"', 'Ġ"')
     text += spacing[-1]
     return text
 
@@ -721,16 +753,18 @@ def process_text(model, text, start, end, match_rhyme, strip_punctuation=False):
     fixed = False
     fixed_toks = set()
     line_ends = set()
+    first_line = True
     for line in lines:
-        if model.startswith('roberta') or model.startswith('gpt2') or (model.startswith('microsoft/deberta') and '-v2' not in model):
+        if (model.startswith('roberta') or model.startswith('gpt2') or (model.startswith('microsoft/deberta') and '-v2' not in model)) and not first_line and not line.startswith(' '):
             line = ' ' + line
+        first_line = False
 
         # Check for the special '{}' characters that indicate fixed text.
         line_new = ''
         shift = 0
         fixed_chars = set()
         for i, ch in enumerate(line):
-            if (model.startswith('bert') or model.startswith('distilbert') or (model.startswith('microsoft/deberta') and '-v2' in model)) and ch == ' ':
+            if (model.startswith('bert') or model.startswith('distilbert') or (model.startswith('microsoft/deberta') and '-v2' in model)) and ch == ' ': 
                 # BERT tokenizer strips spaces, so we must account for that.
                 shift += 1
             if ch == '{':
@@ -748,9 +782,12 @@ def process_text(model, text, start, end, match_rhyme, strip_punctuation=False):
         line_fixed_toks = set()
         i = 0
         for j, tok in enumerate(line_toks):
-            tok = tokenizer.convert_tokens_to_string([tok])
+            if model.startswith('microsoft/deberta') and '-v2' not in model:
+                tok = tokenizer.convert_tokens_to_string([tok])
             if tok.startswith('##'):
                 tok = tok[2:]
+            if tok.startswith('▁'):
+                tok = tok[1:]
             nchars = len(tok)
             for k in range(nchars):
                 if i+k in fixed_chars:
@@ -778,8 +815,11 @@ def process_text(model, text, start, end, match_rhyme, strip_punctuation=False):
         # Check for multipart words.
         word_bounds = []
         after_apostrophe = False
+        after_double_quote = False
         for i, tok in enumerate(line_toks):
-            if is_word_piece(model, tok) or tok == "'" or \
+            if model.startswith('microsoft/deberta') and '-v2' not in model:
+                tok = tokenizer.convert_tokens_to_string([tok])
+            if (is_word_piece(model, tok) and not after_double_quote) or tok == "'" or \
                     (after_apostrophe and tok in ("s", "d", "st", "ve", "re", "nt", "ll", "t", "m")):
                 if not word_bounds:
                     word_bounds.append([i, i])
@@ -787,7 +827,8 @@ def process_text(model, text, start, end, match_rhyme, strip_punctuation=False):
                     word_bounds[-1][1] = i
             else:
                 word_bounds.append([i, i])
-            after_apostrophe = tok == '\''
+            after_apostrophe = tok == "'"
+            after_double_quote = tok in ('"', ' "', '▁"', 'Ġ"')
         for i1, i2 in word_bounds:
             if i1 == i2:
                 continue
@@ -853,12 +894,21 @@ def depoeticize(text, max_iterations=100, batch_size=10,
                 num_changes_per_iter=1):
     stopwords = set(stopwords)
 
-    if modifier is not None:
-        modifier = modifier()
+    # The detokenizer doesn't properly handle cases where the input is all space. It is necessary
+    # to implement good behavior in this case because it can arise when this function is called
+    # by banalify.
+    if re_space_and_brackets.match(text):
+        return text.replace('{', '').replace('}', '')
+    
+    # Stripping smart quotes because some of the models don't seem to handle them properly.
+    text = text.replace('“','"').replace('”','"').replace('‘','\'').replace('’','\'').replace('\r\n', '\n')
 
     initialize_model(model_type, model_path)
     initialize_rhyme_and_meter(model_type, meter=match_meter or allow_punctuation is not None,
                                rhymes=match_rhyme)
+
+    if modifier is not None:
+        modifier = modifier().to(device)
 
     topicless_toks1 = tokenizer.tokenize(f'{bos_token}Title: {mask_token} / Author: {mask_token} {mask_token} / Text: \n\n')
     if title and author:
@@ -917,7 +967,7 @@ Max iterations: {max_iterations}<br />
             html += 'Always allowing punctuation<br />'
         if allow_punctuation is False:
             html += 'Never allowing punctuation<br />'
-        if modifier:
+        if modifier is not None:
             html += 'Modifier provided<br />'
         if sequential:
             html += 'Running in sequential mode<br />'
@@ -966,6 +1016,7 @@ Highlight: <select name="highlighting" id="highlighting">
                     continue
                 idx = tokenizer.convert_tokens_to_ids([tok])[0]
                 discouraged_words[idx] = discourage_repetition
+            discouraged_words = discouraged_words.to(device)
         else:
             discouraged_words = None
         
@@ -1141,7 +1192,7 @@ Highlight: <select name="highlighting" id="highlighting">
                     i1 = i
                     i2 = i
                 s = tokenizer.convert_tokens_to_string(tokenized_text[i1:i2+1]).replace(" ' ", "'")
-                if tokenized_text[i1][0] in ('Ġ', '▁', ' '):
+                if tokenized_text[i1][0] in ('Ġ', 'Ċ', '▁', ' '):
                     s = ' ' + s
                 if max_entropy == min_entropy:
                     entropy_relative = 0.0
@@ -1499,7 +1550,7 @@ def metalness_modifier():
     metalness = json.load(f)
     f.close()
     vocab = tokenizer.get_vocab()
-    metalness_modifier = [0.0] * len(vocab)
+    metalness_modifier = [0.0] * vocab_size
     for i, tok in enumerate(vocab):
         if tok in metalness:
             metalness_modifier[i] = metalness[tok]
@@ -1520,10 +1571,21 @@ def banalify(text, window_size=10, context_size=10, batch_size=10,
     initialize_rhyme_and_meter(model_type, meter=match_meter or allow_punctuation is not None,
                                rhymes=match_rhyme)
     
-    toks = tokenizer.tokenize(text.replace('{', '').replace('}', ''))
+    # Stripping characters that some of the models don't seem to handle properly.
+    text = text.replace('“','"').replace('”','"').replace('‘','\'').replace('’','\'').replace('\r', '').replace('—', '').replace('…', '...').replace(' ', ' ')
+    text = "".join([c for c in unicodedata.normalize('NFKD', text) if not unicodedata.combining(c)])
+
+    toks, fixed_toks, _, _, _ = process_text(model_type, text, 0, 0, False, False)
     spacing, capitalization = scan_tokenization(model_type, text, toks)
+
+    if model_type.startswith('microsoft/deberta') and '-v2' not in model_type:
+        open_bracket = tokenizer.tokenize('{')[0]
+        close_bracket = tokenizer.tokenize('}')[0]
+    else:
+        open_bracket = '{'
+        close_bracket = '}'
     
-    out_toks = []
+    out_text = ''
     left_context_toks = []
     left_context_text = ''
     left_context_size = 0
@@ -1532,127 +1594,158 @@ def banalify(text, window_size=10, context_size=10, batch_size=10,
     spacing_idx = 0
     bracket_left_open = False
     while i < len(toks):
-        # Count the current_window excluding { and }
+        # Count the current_window
         window_end = i
         num_non_word_pieces = 0
         bracket_indices = set()
+        spaced_bracket_indices = set()
         j = 0
+        after_apostrophe = False
+        after_double_quote = False
         while j < window_size and window_end < len(toks):
-            if not is_word_piece(model_type, toks[window_end]):
-                if toks[window_end] in ('{', ' {', '}', ' }'):
-                    bracket_indices.add(num_non_word_pieces)
-                else:
-                    j += 1
+            tok = toks[window_end]
+            if model_type.startswith('microsoft/deberta') and '-v2' not in model_type:
+                tok = tokenizer.convert_tokens_to_string([tok])
+            if not ((is_word_piece(model_type, tok) and not after_double_quote) or tok == "'" or \
+                    (after_apostrophe and tok in ("s", "d", "st", "ve", "re", "nt", "ll", "t", "m"))):
+                j += 1
                 num_non_word_pieces += 1
             window_end += 1
+            after_apostrophe = tok == "'"
+            after_double_quote = tok in ('"', ' "', '▁"', 'Ġ"')
             
         # Extend the window if it ends in the middle of a word
+        after_apostrophe = False
+        after_double_quote = False
         while window_end < len(toks):
-            if is_word_piece(model_type, toks[window_end]):
+            tok = toks[window_end]
+            if model_type.startswith('microsoft/deberta') and '-v2' not in model_type:
+                tok = tokenizer.convert_tokens_to_string([tok])
+            if (is_word_piece(model_type, tok) and not after_double_quote) or tok == "'" or \
+                    (after_apostrophe and tok in ("s", "d", "st", "ve", "re", "nt", "ll", "t", "m")):
                 window_end += 1
             else:
                 break
+            after_apostrophe = tok == "'"
+            after_double_quote = tok in ('"', ' "', '▁"', 'Ġ"')
                 
         window_toks = toks[i:window_end]
-        window_text = tokenizer.convert_tokens_to_string(window_toks)
         window_spacing = spacing[spacing_idx:spacing_idx+num_non_word_pieces] + ['']
         window_capitalization = capitalization[spacing_idx:spacing_idx+num_non_word_pieces]
         
-        # Cut out the spacing and capitalization for instances of { and }
-        new_spacing = []
-        tmp = ''
-        for k, s in enumerate(window_spacing):
-            if k in bracket_indices:
-                tmp = s
-            else:
-                new_spacing.append(tmp + s)
-                tmp = ''
-        window_spacing = new_spacing
-        
-        new_capitalization = []
-        tmp = ''
-        for k, s in enumerate(window_capitalization):
-            if k in bracket_indices:
-                tmp = s
-            else:
-                if tmp.startswith('upper') and s == 'lower':
-                    new_capitalization.append('upper_initial')
-                else:
-                    new_capitalization.append(s)
-                tmp = ''
-        window_capitalization = new_capitalization
-        
-        # Complete { and } if the window ended up inbetween them
-        firstopen = window_text.find('{')
-        firstclose = window_text.find('}')
-        lastopen = window_text.rfind('{')
-        lastclose = window_text.rfind('}')
-        if bracket_left_open:
-            window_text = '{' + window_text
-        if firstclose != -1 and (firstopen == -1 or firstopen > firstclose):
-            bracket_left_open = False
-        if (lastopen != -1 or bracket_left_open) and (lastclose == -1 or lastclose < lastopen):
-            window_text = window_text + '}'
-            bracket_left_open = True
+        # Add { and } around fixed text within the window
+        bracketed_window_toks = []
+        fixed = False
+        for k, tok in enumerate(window_toks):
+            tok_idx = i + k
+            if tok_idx in fixed_toks and not fixed:
+                fixed = True
+                bracketed_window_toks.append(open_bracket)
+            if tok_idx not in fixed_toks and fixed:
+                fixed = False
+                bracketed_window_toks.append(close_bracket)
+            bracketed_window_toks.append(tok)
+        if fixed:
+            bracketed_window_toks.append(close_bracket)
+        window_text = tokenizer.convert_tokens_to_string(bracketed_window_toks)
         
         # Count the right context, as above
         right_context_end = window_end
         j = 0
+        after_apostrophe = False
+        after_double_quote = False
         while j < context_size and right_context_end < len(toks):
-            if not is_word_piece(model_type, toks[right_context_end]):
-                if toks[right_context_end] != '{' and toks[right_context_end] != '}':
-                    j += 1
+            tok = toks[right_context_end]
+            if model_type.startswith('microsoft/deberta') and '-v2' not in model_type:
+                tok = tokenizer.convert_tokens_to_string([tok])
+            if not ((is_word_piece(model_type, tok) and not after_double_quote) or tok == "'" or \
+                    (after_apostrophe and tok in ("s", "d", "st", "ve", "re", "nt", "ll", "t", "m"))):
+                j += 1
             right_context_end += 1
+            after_apostrophe = tok == "'"
+            after_double_quote = tok in ('"', ' "', '▁"', 'Ġ"')
+        after_apostrophe = False
+        after_double_quote = False
         while right_context_end < len(toks):
-            if is_word_piece(model_type, toks[right_context_end]):
+            tok = toks[right_context_end]
+            if model_type.startswith('microsoft/deberta') and '-v2' not in model_type:
+                tok = tokenizer.convert_tokens_to_string([tok])
+            if (is_word_piece(model_type, tok) and not after_double_quote) or tok == "'" or \
+                    (after_apostrophe and tok in ("s", "d", "st", "ve", "re", "nt", "ll", "t", "m")):
                 right_context_end += 1
             else:
                 break
+            after_apostrophe = tok == "'"
+            after_double_quote = tok in ('"', ' "', '▁"', 'Ġ"')
                 
         right_context_toks = toks[window_end:right_context_end]
-        right_context_toks = [tok for tok in right_context_toks if tok not in ('{', '}')]
         right_context_text = tokenizer.convert_tokens_to_string(right_context_toks)
-        if left_context_text:
-            contextualized_text = f'{{{left_context_text}}} {window_text} {{{right_context_text}}}'
+        if model_type.startswith('bert') or (model_type.startswith('microsoft/deberta') and '-v2' in model_type):
+            maybe_space = ' '
         else:
-            contextualized_text = f'{window_text} {{{right_context_text}}}'
+            maybe_space = ''
+        if left_context_text:
+            contextualized_text = f'{{{left_context_text}}}{maybe_space}{window_text}{maybe_space}{{{right_context_text}}}'
+        else:
+            contextualized_text = f'{window_text}{maybe_space}{{{right_context_text}}}'
         
-        #print(contextualized_text)
         contextualized_text = depoeticize(contextualized_text, max_iterations, batch_size,
-                                          match_meter, match_rhyme, title, author,
-                                          randomize, cooldown, modifier,
-                                          forbid_reversions, preserve_punctuation,
-                                          strong_topic_bias, stop_score,
-                                          discourage_repetition, stopwords,
-                                          model_type, model_path, False,
-                                          allow_punctuation, sequential, verbose)
+                                        match_meter, match_rhyme, title, author,
+                                        randomize, cooldown, modifier,
+                                        forbid_reversions, preserve_punctuation,
+                                        strong_topic_bias, stop_score,
+                                        discourage_repetition, stopwords,
+                                        model_type, model_path, False,
+                                        allow_punctuation, sequential, verbose)
         
         # Trim off the previous and next windows from the output
-        window_toks = tokenizer.tokenize(contextualized_text)
+        window_toks = tokenizer.tokenize(contextualized_text + ' x')[:-1]
+        if model_type.startswith('microsoft/deberta') and '-v2' in model_type and tokenizer.convert_tokens_to_string(window_toks[:2]) in ('."', ".'"):
+            # Special case involving how the DeBERTa v2 tokenizer handles '."'
+            window_toks = window_toks[1:]
+            window_toks[0] = tokenizer.tokenize('."')[0]
         window_toks = window_toks[len(left_context_toks) if left_context_toks else 0:
                                   -len(right_context_toks) if right_context_toks else None]
-        out_toks += window_toks
         
-        window_text = detokenize(model_type, window_toks, window_spacing, window_capitalization)
+        start_of_line = out_text == '' or out_text.endswith('\n')
+        window_text = detokenize(model_type, window_toks, window_spacing, window_capitalization, start_of_line=start_of_line)
+        out_text += window_text
         print(window_text, end='')
         
         # Advance the window and the end of the left context
         left_context_toks += window_toks
-        left_context_toks = [tok for tok in left_context_toks if tok not in ('{', '}')]
-        left_context_size += window_size
-        spacing_idx += num_non_word_pieces
+        #print(left_context_toks)
+        #print(left_context_size)
+        #print(window_size)
+        left_context_size = len(left_context_toks)
+        spacing_idx += num_non_word_pieces - len(bracket_indices)
         i = window_end
         
         # Advance the beginning of the left context
+        after_apostrophe = False
+        after_double_quote = False
         while left_context_size > context_size:
             left_context_toks = left_context_toks[1:]
-            if not is_word_piece(model_type, left_context_toks[0]):
+            tok = left_context_toks[0]
+            if model_type.startswith('microsoft/deberta') and '-v2' not in model_type:
+                tok = tokenizer.convert_tokens_to_string([tok])
+            if not ((is_word_piece(model_type, tok) and not after_double_quote) or tok == "'" or \
+                    (after_apostrophe and tok in ("s", "d", "st", "ve", "re", "nt", "ll", "t", "m"))):
                 left_context_size -= 1
-        while left_context_toks and is_word_piece(model_type, left_context_toks[0]):
+            after_apostrophe = tok == "'"
+            after_double_quote = tok in ('"', ' "', '▁"', 'Ġ"')
+        after_apostrophe = False
+        after_double_quote = False
+        while left_context_toks and (
+                    (is_word_piece(model_type, left_context_toks[0]) and not after_double_quote)
+                    or left_context_toks[0] == "'" or
+                    (after_apostrophe and left_context_toks[0] in ("s", "d", "st", "ve", "re", "nt", "ll", "t", "m"))
+                ):
+            after_apostrophe = left_context_toks[0] == "'"
+            after_double_quote = left_context_toks[0] in ('"', ' "', '▁"', 'Ġ"')
             left_context_toks = left_context_toks[1:]
         left_context_text = tokenizer.convert_tokens_to_string(left_context_toks)
-        left_context_text = left_context_text.replace('{', '').replace('}', '')
-    return tokenizer.convert_tokens_to_string(out_toks)
+    return out_text
 
 # Bouts-rimés (rhymed ends) is an old French pastime in which one person selects
 # series of rhyming words and another person composes a poem using them. This
@@ -1688,14 +1781,14 @@ def bouts_rimés(rhymes, meter='u-u-u-u-u-',
                 if test_meter in meter_dict:
                     permitted_words += meter_dict[test_meter]
             permitted_words *= 1.0 - word_pieces
+            permitted_words = permitted_words.cpu()
 
             if first:
                 probs = permitted_words / sum(permitted_words)
                 tok_id = torch.multinomial(probs, 1)
             else:
-                probs = compute_replacement_probs_for_masked_tokens \
-                        (model, toks + [{mask_token}], [[len(toks), len(toks)]])
-                probs = probs[0][0]
+                _, probs = compute_probs_for_masked_tokens(model, [toks + [{mask_token}]], [[[[len(toks), len(toks)]]]], 1, replacements_only=True)
+                probs = probs[0][0][0][0]
                 noise = torch.randn_like(probs)
                 noise = noise * 0.75 + 1.0
                 probs *= noise
