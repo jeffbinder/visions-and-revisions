@@ -1542,19 +1542,33 @@ def parody(text, match_meter=False, match_rhyme=False, topic=None,
     text = tokenizer.convert_tokens_to_string(out)
     return tokenizer.clean_up_tokenization(text)
 
+# Add modifier=json_modifier('<filename>') to bias the results in favor of certain
+# words, as read from a JSON file. The file should contain an object mapping words to
+# numbers. You can generate file like this using generate_modifier.py. Lower the
+# factor parameter to decrease the effect.
+def json_modifier(filename, factor=1.0, default_score=-10.0):
+    def modifier():
+        f = open(filename, 'r')
+        scores = json.load(f)
+        f.close()
+        vocab = tokenizer.get_vocab()
+        score_vector = [default_score] * vocab_size
+        for tok in vocab:
+            i = vocab[tok]
+            if tok.startswith('Ġ') or tok.startswith('Ċ') or tok.startswith(' ') or tok.startswith('▁'):
+                tok = tok[1:]
+            tok = tok.lower()
+            if tok in scores:
+                score_vector[i] = scores[tok]
+        score_tensor = m(torch.tensor(score_vector))
+        mean_score = 1.0 / score_tensor.shape[0]
+        return (1.0 - factor) * mean_score + factor * score_tensor
+    return modifier
+
 # Add modifier=metalness_modifier to bias the results toward words that occur
 # frequently in heavy metal lyrics. First you will need to download the data set
 # available at https://github.com/ijmbarr/pythonic-metal.
-def metalness_modifier():
-    f = open('metalness.json', 'r')
-    metalness = json.load(f)
-    f.close()
-    vocab = tokenizer.get_vocab()
-    metalness_modifier = [0.0] * vocab_size
-    for i, tok in enumerate(vocab):
-        if tok in metalness:
-            metalness_modifier[i] = metalness[tok]
-    return m(torch.tensor(metalness_modifier))
+metalness_modifier = json_modifier('metalness.json')
 
 # Depoeticizes a text piece by piece examining only an n-word window at a time, with
 # a certain amount of context to the left and right. This procedure can handle longer

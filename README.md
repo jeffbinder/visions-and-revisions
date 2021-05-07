@@ -244,7 +244,7 @@ As another example, I asked for an iambic pentameter couplet using the rhyming w
 > Results included project solar storm,  
 > The first proposal for another form.
 
-## Metalizer
+## Modifiers
 
 I also included a feature that enables you to bias the output toward an arbitrary vocabulary. I tested this out using the data from Iain Barr's [analysis of the vocabulary of heavy metal lyrics](https://github.com/ijmbarr/pythonic-metal). Suppose, for instance, "I Wandered Lonely as a Cloud" is not metal enough for your tastes. Perhaps you would prefer this machine-generated alternative:
 
@@ -254,6 +254,47 @@ I also included a feature that enables you to bias the output toward an arbitrar
 > And spit, spit hatred underground,  
 > Into her flesh, into the stone,  
 > Vibrated and rattled in her bone.
+
+To use this feature, you can run the `generate_modifer.py` script to analyze the vocabulary
+of a given text, then supply the resulting JSON file by adding the parameter
+`modifier=json_modifier('filename')` to any of the text rewriter functions. For
+instance, I used the DeBERTa xxlarge model to generate a version of Alfred, Lord Tennyson's
+"The Kraken" using the vocabulary of the PyTorch library documentation. Here
+is the original:
+
+> Below the thunders of the upper deep,
+> Far, far beneath in the abysmal sea,
+> His ancient, dreamless, uninvaded sleep
+> The Kraken sleepeth: faintest sunlights flee
+> About his shadowy sides; above him swell
+> Huge sponges of millennial growth and height;
+> And far away into the sickly light,
+> From many a wondrous grot and secret cell
+> Unnumbered and enormous polypi
+> Winnow with giant arms the slumbering green.
+> There hath he lain for ages, and will lie
+> Battening upon huge sea worms in his sleep,
+> Until the latter fire shall heat the deep;
+> Then once by man and angels to be seen,
+> In roaring he shall rise and on the surface die.
+
+Here is the rewritten version, which replaces the deep sea with deep neural networks:
+
+> Within the matrix of the hidden deep,
+> Deep, deep below in the forgotten sea,
+> Through hidden, hidden, universal sleep
+> The Matrix passes: transient sunlights flee
+> Across its infinite folds; within them swell
+> Dense layers of infinity width and height;
+> And deep below beyond the transient light,
+> From many a hidden torch and hidden cell
+> Persistent and persistent arises
+> Outside each hidden torch the infinite green.
+> Thus has it passed for ever, and will lie
+> Heavily within its dense folds in deep sleep,
+> Until the hidden matrix can float the deep;
+> Then known to none and never to be seen,
+> In safety it will float and let the matrix die.
 
 ## How it works
 
