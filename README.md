@@ -186,7 +186,7 @@ All of these revisions retain the rhyme, meter, and punctuation of the original 
 
 ## Changing the author
 
-The finetuned model also incorporates information about the authors of the poem it is trained on. Based on this, it is possible to give the program hints about the author of a poem as well as the title.
+The finetuned model also incorporates information about the authors of the poems it is trained on. Based on this, it is possible to give the program hints about the author of a poem as well as the title.
 
 For example, here is the first stanza of "I Wandered Lonely as a Cloud" by William Wordsworth:
 
@@ -262,39 +262,39 @@ instance, I used the DeBERTa xxlarge model to generate a version of Alfred, Lord
 "The Kraken" using the vocabulary of the PyTorch library documentation. Here
 is the original:
 
-> Below the thunders of the upper deep,
-> Far, far beneath in the abysmal sea,
-> His ancient, dreamless, uninvaded sleep
-> The Kraken sleepeth: faintest sunlights flee
-> About his shadowy sides; above him swell
-> Huge sponges of millennial growth and height;
-> And far away into the sickly light,
-> From many a wondrous grot and secret cell
-> Unnumbered and enormous polypi
-> Winnow with giant arms the slumbering green.
-> There hath he lain for ages, and will lie
-> Battening upon huge sea worms in his sleep,
-> Until the latter fire shall heat the deep;
-> Then once by man and angels to be seen,
-> In roaring he shall rise and on the surface die.
+> Below the thunders of the upper deep,  
+> Far, far beneath in the abysmal sea,  
+> His ancient, dreamless, uninvaded sleep  
+> The Kraken sleepeth: faintest sunlights flee  
+> About his shadowy sides; above him swell  
+> Huge sponges of millennial growth and height;  
+> And far away into the sickly light,  
+> From many a wondrous grot and secret cell  
+> Unnumbered and enormous polypi  
+> Winnow with giant arms the slumbering green.  
+> There hath he lain for ages, and will lie  
+> Battening upon huge sea worms in his sleep,  
+> Until the latter fire shall heat the deep;  
+> Then once by man and angels to be seen,  
+> In roaring he shall rise and on the surface die.  
 
 Here is the rewritten version, which replaces the deep sea with deep neural networks:
 
-> Within the matrix of the hidden deep,
-> Deep, deep below in the forgotten sea,
-> Through hidden, hidden, universal sleep
-> The Matrix passes: transient sunlights flee
-> Across its infinite folds; within them swell
-> Dense layers of infinity width and height;
-> And deep below beyond the transient light,
-> From many a hidden torch and hidden cell
-> Persistent and persistent arises
-> Outside each hidden torch the infinite green.
-> Thus has it passed for ever, and will lie
-> Heavily within its dense folds in deep sleep,
-> Until the hidden matrix can float the deep;
-> Then known to none and never to be seen,
-> In safety it will float and let the matrix die.
+> Within the matrix of the hidden deep,  
+> Deep, deep below in the forgotten sea,  
+> Through hidden, hidden, universal sleep  
+> The Matrix passes: transient sunlights flee  
+> Across its infinite folds; within them swell  
+> Dense layers of infinity width and height;  
+> And deep below beyond the transient light,  
+> From many a hidden torch and hidden cell  
+> Persistent and persistent arises  
+> Outside each hidden torch the infinite green.  
+> Thus has it passed for ever, and will lie  
+> Heavily within its dense folds in deep sleep,  
+> Until the hidden matrix can float the deep;  
+> Then known to none and never to be seen,  
+> In safety it will float and let the matrix die.  
 
 ## How it works
 
