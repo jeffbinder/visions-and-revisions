@@ -5,6 +5,8 @@
 
 "A Hundred Visions and Revisions" is a computer program that alters poems using a neural-network language model. It works by replacing the individual words of the text, one by one, with other words that are more probable according to the BERT language model, while preserving rhyme and meter; in effect, this process banalifies the poem, replacing its linguistic distinctiveness with normativity. The program can also attempt to revise a poem to be about a different topic.
 
+[Update 2021: Building on some of the ideas I developed for this project, I am now working on a more general system for controlling text generators called [PromptArray](https://github.com/jeffbinder/promptarray).]
+
 As an example, I started with the poem "The Sick Rose" by William Blake:
 
 > O Rose thou art sick.  
