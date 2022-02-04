@@ -957,6 +957,8 @@ Max iterations: {max_iterations}<br />
             html += 'Matching meter<br />'
         if match_rhyme:
             html += 'Matching rhyme<br />'
+        if require_new_rhymes:
+            html += 'Requiring new rhymes<br />'
         if forbid_reversions:
             html += 'Forbidding reversions<br />'
         if preserve_punctuation:
